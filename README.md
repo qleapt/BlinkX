@@ -4,6 +4,8 @@
 SPHEREx images of that patch of sky play as a short movie. Stars that move (like Barnard's Star) or change
 brightness (like R Draconis) stand out, just like the "blink comparators" astronomers used to find Pluto.
 
+**New here? Start with the [tutorial](TUTORIAL.md):** five short lessons with real targets, no astronomy needed.
+
 The tool fetches small image cutouts on demand from the NASA/IPAC Infrared Science Archive (IRSA). Nothing is
 bulk-downloaded, and new SPHEREx data appear automatically as the archive is updated each week.
 
