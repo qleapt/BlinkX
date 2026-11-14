@@ -483,12 +483,6 @@ def gaia_on(mjd):
             if -2 < a < shape[1] + 1 and -2 < b < shape[0] + 1]
 
 
-def sky_offset(px, py):
-    r, d = wgrid.pixel_to_world_values(px, py)
-    de = ((r - ra0 + 180) % 360 - 180) * np.cos(np.radians(dec0)) * 3600
-    return float(de), float((d - dec0) * 3600)
-
-
 COORD_NOTE = ("📍 You typed a sky position, so nothing is followed here (the orange cross marks the spot). "
               "Look for anything that moves or changes yourself, then **📍 Mark** it on two dates to measure it.")
 
@@ -541,73 +535,96 @@ def pending_notes():
     watch()
 
 
-if ss.mode == "motion":
-    load_secs = load.done()
-    if tgt.source == "coordinates":
-        st.subheader(f"Motion check at {tgt.name} ({band})")
-        st.info("A motion check compares where a **known object** is predicted to be with where SPHEREx sees it. "
-                "You typed a sky position, so there is no catalogued object (and no prediction) here.\n\n"
-                "**Do it by hand instead:** choose 📍 *Mark*, click a star on the first date, switch to a later "
-                "date with ▶ or the timeline, and click the *same* star again. The panel shows how far it moved "
-                "and its speed in ″ per year. If you mark nothing, there is no marked object to measure.")
-        sky_viewer(frames, key_extra="motion")
-        pending_notes()
-        st.caption(f"{len(stamps)} photos loaded in {load_secs:.1f} s. Stars move very little: anything below "
-                   "about 3″ (half a SPHEREx pixel) between dates is within the measuring error.")
-        st.stop()
-    st.subheader(f"Motion check: {tgt.name} in {band}")
-    st.caption(f"{len(stamps)} photos loaded in {load_secs:.1f} s")
+def _go_find(mark):
+    ss["find"] = dict(mark=mark, field=tgt.name)
+    ss["mode"] = "motion"
+
+
+def _drop_find():
+    ss.pop("find", None)
+
+
+def check_my_find(marks, key):
+    """'Check my find', only on request: the user's mark -> nearest Gaia star -> motion check."""
+    if not marks:
+        return
+    with st.container(border=True):
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        i = c1.selectbox("🔎 Check my find: which mark?", range(len(marks)), key=f"find_sel|{key}",
+                         format_func=lambda i: f"#{i + 1} · {marks[i].get('date', '')} · RA {marks[i]['ra']:.5f}°, "
+                                               f"Dec {marks[i]['dec']:+.5f}°",
+                         help="Pick one of your marks. The app then looks for a catalogued star (Gaia) at that spot "
+                              "and checks whether SPHEREx sees it move as the catalogue predicts.")
+        c2.button("Check my find", type="primary", on_click=_go_find, args=(marks[min(i, len(marks) - 1)],),
+                  key=f"find_go|{key}", use_container_width=True,
+                  help="Opens the Motion check for your marked object.")
+
+
+def motion_check(t, note=""):
+    """Measured positions of target t in every frame against its predicted path (plot, metrics, table)."""
+    r_ref, d_ref = targets.position_at(t, config.REFERENCE_MJD)
+
+    def offset(px, py):  # arcsec east / north of t's catalogue position on 2026-01-01
+        r, d = wgrid.pixel_to_world_values(px, py)
+        de = ((r - r_ref + 180) % 360 - 180) * np.cos(np.radians(d_ref)) * 3600
+        return float(de), float((d - d_ref) * 3600)
+
+    st.subheader(f"Motion check: {t.name} in {band}")
+    if note:
+        st.caption(note)
     pts = []
     for f in frames:
-        r, d = targets.position_at(tgt, f.mjd_mid)
-        par = targets.predicted_offsets(tgt, [f.mjd_mid], config.REFERENCE_MJD)[0] - \
-            targets.predicted_offsets(tgt, [f.mjd_mid], config.REFERENCE_MJD, with_parallax=False)[0]
+        r, d = targets.position_at(t, f.mjd_mid)
+        par = targets.predicted_offsets(t, [f.mjd_mid], config.REFERENCE_MJD)[0] - \
+            targets.predicted_offsets(t, [f.mjd_mid], config.REFERENCE_MJD, with_parallax=False)[0]
         gx, gy = wgrid.world_to_pixel_values(r, d)
         gx, gy = float(gx) - par[0] / arcsec_px, float(gy) + par[1] / arcsec_px  # east is -x
         cx, cy = photometry.centroid(f.image, gx, gy, r=4)
         if not np.isfinite(cx):
             continue
-        de, dn = sky_offset(cx, cy)
+        de, dn = offset(cx, cy)
         err = 0.6 * (1 if f.kind == "survey" else 2)
         if f.kind == "stack" and len(f.stamps) >= 3:  # scatter of single-exposure centroids
             singles = [photometry.centroid(by_uri[s.uri].image, cx, cy, r=4) for s in f.stamps if s.uri in by_uri]
-            singles = np.array([sky_offset(*c) for c in singles if np.isfinite(c[0])])
+            singles = np.array([offset(*c) for c in singles if np.isfinite(c[0])])
             if len(singles) >= 3:
                 err = max(0.3, float(np.hypot(*singles.std(axis=0)) / np.sqrt(len(singles))))
-        pe, pn = targets.predicted_offsets(tgt, [f.mjd_mid], config.REFERENCE_MJD)[0]
+        pe, pn = targets.predicted_offsets(t, [f.mjd_mid], config.REFERENCE_MJD)[0]
         k = int(f.label.split(":")[0].split()[-1]) if f.label.startswith("Epoch") else 0
         pts.append(dict(label=f.label.split(" · ")[0] if k == 0 else f"Epoch {k}", epoch=k, mjd=f.mjd_mid,
                         date=targets.mjd_to_date(f.mjd_mid), de=de, dn=dn, err=err,
                         off=float(np.hypot(de - pe, dn - pn)), par_e=par[0], par_n=par[1], pred_e=pe, pred_n=pn))
     if len(pts) < 2:
-        st.info("The target needs to be visible in at least two photos. Try a band where it is bright, or a "
+        st.info("The object needs to be visible in at least two photos. Try a band where it is bright, or a "
                 "larger field of view.")
-        st.stop()
+        return
     m_lo, m_hi = min(p["mjd"] for p in pts) - 60, max(p["mjd"] for p in pts) + 60
     grid_mjd = np.linspace(m_lo, m_hi, int(min(2000, max(200, (m_hi - m_lo) / 3))))
-    tr = targets.predicted_offsets(tgt, grid_mjd, config.REFERENCE_MJD)
+    tr = targets.predicted_offsets(t, grid_mjd, config.REFERENCE_MJD)
     st.plotly_chart(render.motion_fig(tr[:, 0], tr[:, 1], pts), use_container_width=True)
     pending_notes()
     yrs = [(p["mjd"] - config.REFERENCE_MJD) / 365.25 for p in pts]
     fit = photometry.fit_motion(yrs, [p["de"] - p["par_e"] for p in pts], [p["dn"] - p["par_n"] for p in pts],
                                 [p["err"] for p in pts])
-    cat_e, cat_n = tgt.pmra / 1000, tgt.pmdec / 1000
+    cat_e, cat_n = t.pmra / 1000, t.pmdec / 1000
+    has_cat = bool(t.pmra or t.pmdec or t.parallax)
     if fit:
         pe, pn, ee, _ = fit
         mu, cat_mu = np.hypot(pe, pn), np.hypot(cat_e, cat_n)
         diff = np.hypot(pe - cat_e, pn - cat_n)
         c1, c2, c3 = st.columns(3)
         c1.metric("Measured motion", f"{mu:.2f} ± {ee:.2f} ″/yr",
-                  help="How fast SPHEREx sees the target drift across the sky, in arcseconds per year: the slope "
+                  help="How fast SPHEREx sees the object drift across the sky, in arcseconds per year: the slope "
                        "of a straight line fitted through the measured positions after removing the parallax "
                        "wobble. ± is the uncertainty (1σ).")
-        c2.metric("Catalogue motion", f"{cat_mu:.2f} ″/yr",
-                  help=f"What the catalogue says ({tgt.source}): the speed the grey line is drawn with.")
-        c3.metric("Difference", f"{diff:.2f} ″/yr", f"{diff / ee:.1f} σ", delta_color="off",
-                  help="Measured minus catalogue. σ (sigma) counts how many uncertainties apart they are: "
-                       "below about 3σ they agree.")
-        if tgt.has_motion:
-            verdict = (f"✅ **Agrees** with the catalogue: SPHEREx sees {tgt.name} move {mu:.2f}″ per year, "
+        if has_cat:
+            c2.metric("Catalogue motion", f"{cat_mu:.2f} ″/yr",
+                      help=f"What the catalogue says ({t.source}): the speed the grey line is drawn with.")
+            c3.metric("Difference", f"{diff:.2f} ″/yr", f"{diff / ee:.1f} σ", delta_color="off",
+                      help="Measured minus catalogue. σ (sigma) counts how many uncertainties apart they are: "
+                           "below about 3σ they agree.")
+        if t.has_motion:
+            verdict = (f"✅ **Agrees** with the catalogue: SPHEREx sees {t.name} move {mu:.2f}″ per year, "
                        f"the catalogue says {cat_mu:.2f}″." if diff < 3 * ee + 0.1 * cat_mu else
                        f"⚠ **Differs** from the catalogue by {diff:.2f}″/yr ({diff / ee:.1f}σ). Saturation "
                        "(an overexposed star), a blended neighbour or too few epochs can cause this; check the blink.")
@@ -615,15 +632,15 @@ if ss.mode == "motion":
             verdict = (f"🚀 **Moves**: {mu:.2f} ± {ee:.2f}″/yr, more than 3× the uncertainty." if mu > 3 * ee else
                        f"No motion detected: less than about {3 * ee:.2f}″/yr (3σ).")
         st.markdown(verdict)
-    st.caption("**Reading the plot:** each coloured point is where the target's light is centred in one photo "
+    st.caption("**Reading the plot:** each coloured point is where the object's light is centred in one photo "
                "(east to the left, as on the sky), relative to its catalogue position on 2026-01-01 (the 0, 0 "
                "point). The grey line is where it *should* be. Error bars show the measuring uncertainty. "
                "Saturated (overexposed) stars and blended neighbours make centres less reliable.")
 
-    plx = tgt.parallax / 1000
+    plx = t.parallax / 1000
     with st.expander("🧮 How the prediction (grey line) and the measurement are calculated", expanded=False):
         st.markdown(
-            f"**The prediction** starts from the catalogue ({tgt.source}) and adds two effects:\n\n"
+            f"**The prediction** starts from the catalogue ({t.source}) and adds two effects:\n\n"
             f"1. **Proper motion** (the star's own drift): **{cat_e:+.3f}″/yr** east and **{cat_n:+.3f}″/yr** north. "
             "After *t* years the star has drifted *t* × that. *t* is counted from 2026-01-01.\n"
             f"2. **Parallax** (the yearly wobble from watching on a moving Earth): **π = {plx:.4f}″**. Earth's "
@@ -639,18 +656,62 @@ if ss.mode == "motion":
             "epoch divided by √(number of photos). Finally the parallax part is subtracted from every point and "
             "a straight line is fitted through position versus time (weighted least squares): its slope is the "
             "**measured motion** above.\n\n"
-            "**Step by step for this target** (all values in arcseconds, ″):")
-        st.dataframe(pd.DataFrame([{
+            "**Step by step for this object** (all values in arcseconds, ″):")
+        df = pd.DataFrame([{
             "Photo": p["label"], "Date": p["date"],
             "Years from 2026-01-01": round((p["mjd"] - config.REFERENCE_MJD) / 365.25, 3),
             "Drift east": round(p["pred_e"] - p["par_e"], 2), "Drift north": round(p["pred_n"] - p["par_n"], 2),
             "Wobble east": round(p["par_e"], 2), "Wobble north": round(p["par_n"], 2),
             "Predicted east": round(p["pred_e"], 2), "Predicted north": round(p["pred_n"], 2),
             "Measured east": round(p["de"], 2), "Measured north": round(p["dn"], 2),
-            "± error": round(p["err"], 2), "Miss (measured − predicted)": round(p["off"], 2)} for p in pts]),
-            hide_index=True, use_container_width=True)
+            "± error": round(p["err"], 2), "Miss (measured − predicted)": round(p["off"], 2)} for p in pts])
+        st.dataframe(df, hide_index=True, use_container_width=True)
         st.caption("Drift = proper motion × years. Wobble = parallax shift. Predicted = drift + wobble. "
                    "Miss = distance between the measured and predicted points.")
+        st.download_button("Download this table (CSV)", df.to_csv(index=False),
+                           f"motion_{t.name.replace(' ', '_')}_{band}.csv", help="Save the step-by-step numbers.")
+
+
+if ss.mode == "motion":
+    load_secs = load.done()
+    find = ss.get("find") if (ss.get("find") or {}).get("field") == tgt.name else None
+    if find:
+        m = find["mark"]
+        try:
+            near, _src = catalogs.gaia_cone(round(m["ra"], 5), round(m["dec"], 5), config.FIND_CONE_DEG)
+            star, sep = catalogs.nearest(near, m["ra"], m["dec"], m["mjd"], config.FIND_MATCH_ARCSEC)
+        except Exception:
+            star, sep = None, None
+            st.warning("The Gaia catalogue could not be reached right now, so there is no prediction. "
+                       "The measured motion is still shown.")
+        st.button(f"← Back to {tgt.name}" if tgt.source != "coordinates" else "← Back", on_click=_drop_find,
+                  help="Forget this find and show the usual motion check.")
+        if star:
+            mt = catalogs.as_target(star, name=f"Your find (Gaia DR3 {star['id']})")
+            note = (f"Your mark ({m.get('date', '')}) at RA {m['ra']:.5f}°, Dec {m['dec']:+.5f}° matches Gaia DR3 "
+                    f"{star['id']} (G = {star['g']:.1f}), {sep:.1f}″ away on that date. The grey line is Gaia's "
+                    "prediction for it.")
+        else:
+            from spx.targets import Target
+            mt = Target("Your find", m["ra"], m["dec"], m["mjd"], source="your mark (no catalogue match)")
+            note = (f"No Gaia star within {config.FIND_MATCH_ARCSEC:g}″ of your mark (RA {m['ra']:.5f}°, Dec {m['dec']:+.5f}°), so there is no "
+                    "prediction: the grey 'line' is just the spot you marked. The measured motion below is "
+                    "SPHEREx's alone. Very cold or very faint objects are often missing from Gaia.")
+        motion_check(mt, f"{len(stamps)} photos loaded in {load_secs:.1f} s. " + note)
+        st.stop()
+    if tgt.source == "coordinates":
+        st.subheader(f"Motion check at {tgt.name} ({band})")
+        st.info("A motion check compares where a **known object** is predicted to be with where SPHEREx sees it. "
+                "You typed a sky position, so nothing is followed here.\n\n"
+                "**Mark it yourself:** choose 📍 *Mark*, click an object on the first date, switch to a later "
+                "date with ▶ or the timeline, and click the *same* object again. The panel shows how far it moved "
+                "and its speed in ″ per year. Then **Check my find** below compares it with the Gaia catalogue.")
+        check_my_find(sky_viewer(frames, key_extra="motion"), "motion")
+        pending_notes()
+        st.caption(f"{len(stamps)} photos loaded in {load_secs:.1f} s. Stars move very little: anything below "
+                   "about 3″ (half a SPHEREx pixel) between dates is within the measuring error.")
+        st.stop()
+    motion_check(tgt, f"{len(stamps)} photos loaded in {load_secs:.1f} s")
     st.stop()
 
 load_secs = load.done()
@@ -712,8 +773,9 @@ with tab_view:
                 arc = c["dist_px"] * arcsec_px
                 c["text"] = (f"moved {arc:.1f}″ toward the {detect.COMPASS[int(round(c['pa_deg'] / 45)) % 8]}"
                              + (f" ({arc / yrs:.1f}″ per year)" if yrs > 0.05 else ""))
-    sky_viewer(shown, diverging, key_extra=mode, stars=found, changes=changed)
+    my_marks = sky_viewer(shown, diverging, key_extra=mode, stars=found, changes=changed)
     pending_notes()
+    check_my_find(my_marks, mode)
 
     with st.expander("🧰 Helpers — off until you switch them on", expanded=bool(h_stars or h_change)):
         st.caption("The app does not point things out by itself: look first, then let a helper check what you saw.")

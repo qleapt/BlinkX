@@ -29,6 +29,10 @@ VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 GAIA_MAX_G = 19.0
 GAIA_TOP = 800
 GAIA_REF_MJD = 57388.5  # Gaia DR3 epoch 2016.0
+# 'Check my find': Gaia positions are for 2016; the fastest star (Barnard's, 10.4"/yr) has moved ~2'
+# since, so search this far around a mark, then match within FIND_MATCH_ARCSEC on the mark's date.
+FIND_CONE_DEG = 0.05
+FIND_MATCH_ARCSEC = 6.0
 # Older surveys shown before the SPHEREx frames (IRSA SIA collections; cutouts come back gzipped)
 SURVEY_MATCH = {
     "D1": {"2mass": "J"}, "D2": {"2mass": "J"}, "D3": {"2mass": "K"},

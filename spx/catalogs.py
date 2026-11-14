@@ -73,6 +73,25 @@ def gaia_at(stars: list[dict], mjd: float):
     return ra2, dec2
 
 
+def nearest(stars: list[dict], ra: float, dec: float, mjd: float, max_arcsec: float = 6.0):
+    """The Gaia star closest to (ra, dec) on date mjd (stars moved to that date), if within max_arcsec.
+    Returns (star, separation in arcsec) or (None, None)."""
+    r, d = gaia_at(stars, mjd)
+    if not len(r):
+        return None, None
+    sep = np.hypot(((r - ra + 180) % 360 - 180) * np.cos(np.radians(dec)), d - dec) * 3600
+    i = int(np.argmin(sep))
+    return (stars[i], float(sep[i])) if sep[i] <= max_arcsec else (None, None)
+
+
+def as_target(s: dict, name: str | None = None):
+    """A Gaia star as a targets.Target (epoch 2016.0), so the motion check can predict its path."""
+    from .targets import Target
+    f = lambda v: 0.0 if v is None or not np.isfinite(v) else float(v)  # noqa: E731
+    return Target(name or f"Gaia DR3 {s['id']}", float(s["ra"]), float(s["dec"]), config.GAIA_REF_MJD,
+                  f(s.get("pmra")), f(s.get("pmdec")), f(s.get("parallax")), "Gaia DR3 (2016.0), matched to your mark")
+
+
 # --- WISE 2010 and 2MASS reference frames ------------------------------------------------
 def _sia(ra: float, dec: float, collection: str, band: str) -> list[dict]:
     path = config.cache_dir() / f"sia_{collection}_{band}_{ra:.4f}_{dec:+.4f}.json"

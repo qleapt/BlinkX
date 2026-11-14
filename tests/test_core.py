@@ -318,3 +318,17 @@ def test_changes_ignore_a_shift_shared_by_all_stars():
     ch = detect.changes(a, _sky(b_stars, seed=5), nsigma=5)
     assert len(ch) == 1 and ch[0]["kind"] == "brightened", ch
     assert abs(ch[0]["x"] - pos[7][0]) < 0.5 and abs(ch[0]["y"] - pos[7][1]) < 0.5
+
+
+# --- Check my find ----------------------------------------------------------------
+def test_nearest_gaia_star_uses_the_mark_date():
+    """A fast star sits 20" from its 2016 position by the mark date: it must still be found there."""
+    from spx import catalogs, config
+    fast = dict(id=1, ra=150.0, dec=10.0, pmra=0.0, pmdec=2000.0, parallax=100.0, g=12.0)   # 2"/yr north
+    slow = dict(id=2, ra=150.0, dec=10.0 + 18 / 3600, pmra=0.0, pmdec=0.0, parallax=1.0, g=12.0)
+    mjd = config.GAIA_REF_MJD + 10 * 365.25          # 10 years later: the fast star is 20" north
+    star, sep = catalogs.nearest([fast, slow], 150.0, 10.0 + 20 / 3600, mjd, max_arcsec=6.0)
+    assert star["id"] == 1 and sep < 0.5
+    assert catalogs.nearest([slow], 151.0, 10.0, mjd, max_arcsec=6.0) == (None, None)
+    t = catalogs.as_target(star)
+    assert t.ref_mjd == config.GAIA_REF_MJD and t.pmdec == 2000.0 and t.has_motion
