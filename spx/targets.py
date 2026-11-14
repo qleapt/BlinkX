@@ -43,7 +43,7 @@ PRESETS = {
 }
 # Band shown first for each preset (where the object stands out best).
 PRESET_BAND = {"Barnard's Star": "D4", "Epsilon Indi B": "D6", "WISE 0855-0714": "D6",
-               "RW Aurigae": "D3", "R Draconis": "D3"}
+               "RW Aurigae": "D3", "R Draconis": "D6"}  # R Dra saturates beyond repair in D1-D3
 ALIASES = {
     "barnard": "Barnard's Star", "barnards star": "Barnard's Star", "barnard's star": "Barnard's Star",
     "gj 699": "Barnard's Star", "epsilon indi b": "Epsilon Indi B", "eps ind b": "Epsilon Indi B",

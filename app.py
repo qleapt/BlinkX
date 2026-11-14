@@ -165,15 +165,21 @@ if ss.mode == "spectrum":
     try:  # warn when a Gaia neighbour falls inside the 12" aperture (SPHEREx pixels are 6.15")
         nb, _ = catalogs.gaia_cone(round(ra0, 4), round(dec0, 4), 0.02)
         mids = [min(r["mjd"] for r in rows), max(r["mjd"] for r in rows)]
+        pr0, pd0 = targets.position_at(tgt, mids[0])
+        gr0, gd0 = catalogs.gaia_at(nb, mids[0])
+        sep0 = np.hypot((gr0 - pr0) * np.cos(np.radians(pd0)), gd0 - pd0) * 3600
+        own = [s["g"] for s, d in zip(nb, sep0) if d < 2.0]
+        g_limit = (min(own) + 3) if own else 99  # only neighbours within 3 mag of the target matter
         for m in mids:
             pr, pd_ = targets.position_at(tgt, m)
             gr, gd = catalogs.gaia_at(nb, m)
             sep = np.hypot((gr - pr) * np.cos(np.radians(pd_)), gd - pd_) * 3600
             for s, d in zip(nb, sep):
-                if 2.0 < d < 15:  # < 2" is the target's own Gaia entry
+                if 2.0 < d < 15 and s["g"] < g_limit:  # < 2" is the target's own Gaia entry
                     close.setdefault(s["id"], (s["g"], []))[1].append(d)
         for g, ds in close.values():
-            st.warning(f"A Gaia star (G = {g:.1f}) lies {min(ds):.0f}–{max(ds):.0f}″ from the target on these dates. "
+            dist = f"{min(ds):.0f}″" if round(min(ds)) == round(max(ds)) else f"{min(ds):.0f}–{max(ds):.0f}″"
+            st.warning(f"A Gaia star (G = {g:.1f}) lies {dist} from the target on these dates. "
                        "SPHEREx pixels are 6.15″, so its light blends into the measurement — especially at short "
                        "wavelengths where a faint, cold target is dark.")
     except Exception:
@@ -185,14 +191,36 @@ if ss.mode == "spectrum":
                + (" (time bins merged)" if fold else "") + ". Hollow points have flagged pixels in the aperture "
                "(often saturation): treat them with care. Quick look, not calibrated; for science use the "
                f"[IRSA SPHEREx Spectrophotometry Tool]({config.SPECTROPHOTOMETRY_TOOL}).")
+    nbad = sum(not np.isfinite(r["flux"]) for r in rows)
+    if nbad:
+        sat = sum(bool(r["flags"]) and r["flags"][0].startswith("SATURATED") for r in rows)
+        bands_sat = sorted({r["band"] for r in rows if r["flags"] and r["flags"][0].startswith("SATURATED")})
+        st.info(f"{nbad} of {len(rows)} exposures could not be measured"
+                + (f"; in {sat} of them the target is so bright that the pixels at its centre are saturated "
+                   f"(bands {', '.join(bands_sat)}). They are listed in the table, not plotted." if sat else "."))
     st.subheader(f"Light curve in {band} (choose the band in the sidebar)")
     st.plotly_chart(render.lightcurve_fig(by_epoch, band, logy), use_container_width=True)
+    wing_rows = {k: [dict(r, flux=r["wing"], err=0.0, flags=[]) for r in v
+                     if r["band"] == band and np.isfinite(r.get("wing", np.nan))] for k, v in by_epoch.items()}
+    if any(wing_rows.values()):
+        st.markdown(f"**Saturated exposures: brightness index from the star's wings ({band})**")
+        st.plotly_chart(render.lightcurve_fig(wing_rows, band, False,
+                                              ytitle="Wing brightness (MJy/sr, relative)"),
+                        use_container_width=True)
+        st.caption("When the centre of a very bright star is saturated, the light 3–5 pixels from the centre still "
+                   "rises and falls with the star's brightness. This index shows the trend only; it is not a flux, "
+                   "and wavelength differences inside the band add scatter.")
     # plain-language change report per band: median clean flux, first vs last epoch
     notes = []
     for b in config.BANDS:
         per = {k: [r for r in v if r["band"] == b and not r["flags"] and np.isfinite(r["flux"])]
                for k, v in by_epoch.items()}
         per = {k: v for k, v in per.items() if len(v) >= 2}
+        flagged_note = ""
+        if len(per) < 2:  # bright stars: every point is flagged; use them, and say so
+            per = {k: [r for r in v if r["band"] == b and np.isfinite(r["flux"])] for k, v in by_epoch.items()}
+            per = {k: v for k, v in per.items() if len(v) >= 2}
+            flagged_note = " (from flagged points)"
         if len(per) >= 2:
             k1, k2 = min(per), max(per)
             f1, f2 = (np.median([r["flux"] for r in per[k]]) for k in (k1, k2))
@@ -200,7 +228,8 @@ if ss.mode == "spectrum":
             sig = abs(f2 - f1) / e if e > 0 else 0
             word = "brighter" if f2 > f1 else "fainter"
             notes.append(f"**{b}**: epoch {k2} is {abs(f2 / f1 - 1) * 100:.0f}% {word} than epoch {k1}"
-                         + (" — a real change is likely" if sig > 3 else " — within the scatter") + f" ({sig:.1f}σ)")
+                         + (" — a real change is likely" if sig > 3 else " — within the scatter")
+                         + f" ({sig:.1f}σ){flagged_note}")
     if notes:
         st.markdown("**What changed?** (median of unflagged points; different wavelengths inside a band add "
                     "scatter)\n\n- " + "\n- ".join(notes)

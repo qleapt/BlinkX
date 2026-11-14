@@ -82,7 +82,18 @@ Embed in another page:
 
 ## The five challenge targets
 
-RESULTS_PLACEHOLDER
+What the tool shows with the data available on 14 Nov 2026 (quick look, 5′ field unless noted). Click a preset
+in the sidebar to reproduce.
+
+| Target | Result |
+|---|---|
+| **Barnard's Star** | 358 exposures, 3 epochs. The star moves about 5″ north per epoch (less than one SPHEREx pixel) and is centred within ~1″ of its Gaia prediction each time. **Subtract** shows a clear light/dark pair. Motion check: 11.0 ± 5.3″/yr against Gaia's 10.39″/yr (agrees; the star is saturated, which limits the precision). With a 10′ field the 2010 WISE frame shows it ~2.8′ further south. |
+| **Epsilon Indi B** | 458 exposures, 4 epochs; the Ba/Bb pair is seen as one source (~21 mJy in D6). Motion check including the April 2010 WISE frame: **4.71 ± 0.04″/yr, the catalogue says 4.71″/yr**. Epsilon Indi A is ~6.7′ away: choose the 15′ field to see both. |
+| **WISE 0855−0714** | Detected in D6 at its predicted position (~0.5 mJy, matching its WISE W2 = 13.9 mag). A Gaia star (G = 16.3) is 4–11″ away on the SPHEREx dates; it dominates D1–D3, and the tool says so. In the May 2010 WISE frame the brown dwarf is detected at 25σ, **127″ east** of where it is now: a big jump in the 10′ blink. |
+| **RW Aurigae** | 335 exposures, 3 epochs; spectrum per epoch with error bars, and a change report per band. The star is bright enough that its pixels are flagged in every exposure (shown as hollow points), so the numbers are indicative: D5/D6 come out ~50% fainter in 2026 than in 2025. |
+| **R Draconis** | 2,493 exposures, split into 9 time bins of ≤ 60 days. The centre of this very bright Mira variable is saturated in most exposures (60 of 68 in the quick look); the tool reports this instead of plotting wrong numbers, and shows a brightness index from the star's wings, which follows its variation. |
+
+These are quick-look results from a hackathon tool, not calibrated measurements.
 
 ## Updating for a new SPHEREx release
 

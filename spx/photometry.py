@@ -40,7 +40,17 @@ def measure(st: Stamp, ra: float, dec: float) -> dict:
     out = dict(mjd=st.mjd, band=st.band, wavelength=st.wavelength, bandwidth=st.bandwidth, uri=st.uri,
                flux=np.nan, err=np.nan, flags=[], x=x, y=y)
     inside = ap > 0
-    if not inside.any() or ann.sum() < 8 or (ap[inside & ~dead].sum() < 0.6 * ap.sum()):
+    if ann.sum() < 8:  # bright star: the sky ring is flagged too; use its finite pixels anyway
+        ann = (r2 >= R_IN ** 2) & (r2 <= R_OUT ** 2) & ~dead
+    if inside.any() and ap[inside & ~dead].sum() < 0.6 * ap.sum():
+        out["flags"] = ["SATURATED CORE (no usable pixels)"]
+        # brightness index from the PSF wings (ring 3-5 px), sky from 7-10 px: relative units only
+        wing = (r2 >= 9) & (r2 <= 25) & ~dead
+        far = (r2 >= 49) & (r2 <= 100) & ~dead
+        if wing.sum() >= 10 and far.sum() >= 10:
+            out["wing"] = float(np.mean(img[wing]) - np.median(img[far]))
+        return out
+    if not inside.any() or ann.sum() < 8:
         return out
     sky = np.median(img[ann])
     sky_var = (1.2533 * np.std(img[ann])) ** 2 / ann.sum()

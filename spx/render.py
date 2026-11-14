@@ -172,7 +172,7 @@ def spectrum_fig(rows_by_epoch: dict, logy: bool = False):
     return _chart_layout(fig, "Wavelength (µm)", "Flux (mJy, quick look)", logy=logy)
 
 
-def lightcurve_fig(rows_by_epoch: dict, band: str, logy: bool = False):
+def lightcurve_fig(rows_by_epoch: dict, band: str, logy: bool = False, ytitle: str | None = None):
     fig = go.Figure()
     for k, rows in rows_by_epoch.items():
         rows = [r for r in rows if r["band"] == band]
@@ -180,7 +180,7 @@ def lightcurve_fig(rows_by_epoch: dict, band: str, logy: bool = False):
             for t in _points(rows, k, "datetime", f"Epoch {k}"):
                 fig.add_trace(t)
     fig.update_layout(showlegend=False)
-    return _chart_layout(fig, "Date", f"{band} flux (mJy)", height=340, logy=logy)
+    return _chart_layout(fig, "Date", ytitle or f"{band} flux (mJy)", height=340, logy=logy)
 
 
 def motion_fig(track_e, track_n, pts):
