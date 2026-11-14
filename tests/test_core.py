@@ -332,3 +332,26 @@ def test_nearest_gaia_star_uses_the_mark_date():
     assert catalogs.nearest([slow], 151.0, 10.0, mjd, max_arcsec=6.0) == (None, None)
     t = catalogs.as_target(star)
     assert t.ref_mjd == config.GAIA_REF_MJD and t.pmdec == 2000.0 and t.has_motion
+
+
+def test_fetch_many_keeps_reporting_while_waiting(monkeypatch):
+    """First photos of different detectors download side by side, and the progress callback keeps ticking
+    while nothing has arrived yet (so the loading screen never looks frozen)."""
+    import time as _t
+    from types import SimpleNamespace
+    from spx import cutouts
+
+    exps = [SimpleNamespace(detector=d, mjd=60000.0 + d, uri=f"u{d}") for d in (1, 2, 3)]
+    monkeypatch.setattr(cutouts, "has_wave_table", lambda e: False)
+    monkeypatch.setattr(cutouts, "is_cached", lambda *a: False)
+
+    def slow(e, *a):
+        _t.sleep(0.8)
+        return SimpleNamespace(mjd=e.mjd, uri=e.uri)
+    monkeypatch.setattr(cutouts, "get_stamp", slow)
+    calls = []
+    t0 = _t.time()
+    stamps, fails = cutouts.fetch_many(exps, 0, 0, 1, progress=lambda d, n: calls.append((round(_t.time() - t0, 1), d, n)))
+    assert len(stamps) == 3 and fails == 0
+    assert _t.time() - t0 < 1.6                       # parallel, not 3 x 0.8 s
+    assert any(d == 0 for _, d, _ in calls)           # ticked before the first photo arrived

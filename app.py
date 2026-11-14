@@ -176,8 +176,15 @@ class Loader:
         self._draw()
 
     def progress(self, frac, text):
-        self.frac, self.ptext = min(1.0, frac), text
-        self._draw()
+        if (min(1.0, frac), text) != (self.frac, self.ptext):
+            self.frac, self.ptext = min(1.0, frac), text
+            self._draw()
+
+    def note(self, text):
+        """A line under the steps without a progress bar (e.g. how long we have been waiting)."""
+        if text != self.ptext:
+            self.ptext = text
+            self._draw()
 
     def done(self, arrive=True):
         secs = time.time() - self.t0
@@ -238,10 +245,25 @@ fut_survey = (_bg.submit(catalogs.survey_frames, round(ra0, 5), round(dec0, 5), 
               if ss.survey and ss.mode in ("blink", "sub", "motion") else None)
 _bg.shutdown(wait=False)
 
+def waiting(t0, what=""):
+    """Plain words for the loading card: how long we have waited, and why when it is long."""
+    el = time.time() - t0
+    return (what + f"{el:.0f} s" + (" · NASA's servers or the connection are slow right now: it keeps trying, and "
+                                    "whatever arrives is saved, so the next visit is fast" if el > 12 else ""))
+
+
 load.step("Asking NASA's archive which photos cover this spot…",
           "SPHEREx has photographed every part of the sky several times since 2025", 1)
 try:
-    exps = search(round(ra0, 4), round(dec0, 4))
+    _t_search, _ex = time.time(), ThreadPoolExecutor(1)
+    _fs = _ex.submit(search, round(ra0, 4), round(dec0, 4))
+    _ex.shutdown(wait=False)
+    while True:  # keep the loading card alive while the archive answers
+        try:
+            exps = _fs.result(timeout=0.5)
+            break
+        except FutureTimeout:
+            load.note(waiting(_t_search))
 except archive.ArchiveBusy:
     load.done(arrive=False)
     st.warning("The NASA/IPAC archive is busy right now. Please try again in a minute.")
@@ -263,8 +285,9 @@ def fetch(todo, label, group_of=None):
 
         def enough(got):
             return need <= {group_of.get(x.uri) for x in got}
+    t_fetch = time.time()
     out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45,
-                                    lambda d, n: load.progress(d / n, f"{d} of {n} photos"),
+                                    lambda d, n: load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · ")),
                                     deadline=config.FETCH_SOFT_DEADLINE if group_of else None,
                                     enough=enough, stats=stats)
     if not out:

@@ -516,35 +516,36 @@ def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, 
     t0 = time.time()
     stamps, fails, done = [], 0, 0
     exps = list(exps)
-    # one exposure per detector without a cached wavelength table goes first, alone
+    total = len(exps)
+
+    def drain(pending, may_stop):
+        """Collect finished downloads; report progress every 0.5 s even when nothing arrived (heartbeat)."""
+        nonlocal done, fails
+        while pending:
+            finished, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            for f in finished:
+                done += 1
+                if f.exception() is None:
+                    stamps.append(f.result())
+                else:
+                    fails += 1
+            if progress:
+                progress(done, total)
+            if (may_stop and pending and deadline is not None and time.time() - t0 > deadline
+                    and stamps and (enough is None or enough(stamps))):
+                break  # the rest keep downloading into the cache
+        return pending
+
+    # one exposure per detector without a cached wavelength table goes first (it brings the table along);
+    # different detectors in parallel, then everything else
     firsts = {}
     for e in exps:
         if not has_wave_table(e) and not is_cached(e, ra, dec, size_arcmin):
             firsts.setdefault(e.detector, e)
     for e in firsts.values():
         exps.remove(e)
-        done += 1
-        try:
-            stamps.append(get_stamp(e, ra, dec, size_arcmin))
-        except Exception:
-            fails += 1
-        if progress:
-            progress(done, len(exps) + done)
-    total = len(exps) + done
-    pending = {_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in exps}
-    while pending:
-        finished, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
-        for f in finished:
-            done += 1
-            if f.exception() is None:
-                stamps.append(f.result())
-            else:
-                fails += 1
-            if progress:
-                progress(done, total)
-        if (pending and deadline is not None and time.time() - t0 > deadline
-                and stamps and (enough is None or enough(stamps))):
-            break  # the rest keep downloading into the cache
+    drain({_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in firsts.values()}, False)
+    pending = drain({_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in exps}, True)
     stamps.sort(key=lambda s: s.mjd)
     if stats is not None:
         stats["skipped"] = len(pending)
