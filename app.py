@@ -11,8 +11,7 @@ from spx import archive, catalogs, config, cutouts, photometry, render, stack, t
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="wide")
 
-PRESET_BAND = {"Barnard's Star": "D4", "Epsilon Indi B": "D6", "WISE 0855-0714": "D6",
-               "RW Aurigae": "D3", "R Draconis": "D3"}
+PRESET_BAND = targets.PRESET_BAND
 MODES = {"blink": "Blink epochs", "add": "Add (all epochs)", "sub": "Subtract (B − A)", "movie": "Every exposure",
          "spectrum": "Spectrum & light curve", "motion": "Motion check"}
 BAND_LABEL = {b: f"{b} · {lo:.2f}–{hi:.2f} µm" for b, (lo, hi, _) in config.BANDS.items()}
@@ -98,6 +97,9 @@ def search(ra, dec):
 
 
 st.title("SPHEREx Blink Viewer")
+st.caption("NASA's SPHEREx telescope maps the whole sky every six months in 102 infrared colours. Pick a target "
+           "in the sidebar (or type any name or RA Dec) and press ▶ Play: things that move or change brightness "
+           "stand out. Try the views in the sidebar for subtraction, spectra and a motion check.")
 try:
     with st.spinner("Looking up the target…"):
         tgt = resolve(ss.target_text)

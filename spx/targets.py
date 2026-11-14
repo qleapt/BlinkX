@@ -41,6 +41,9 @@ PRESETS = {
     "R Draconis": Target("R Draconis", 248.167433, 66.755117, J2000_MJD,
                          -5.0, 14.0, 2.5, "SIMBAD (J2000)"),
 }
+# Band shown first for each preset (where the object stands out best).
+PRESET_BAND = {"Barnard's Star": "D4", "Epsilon Indi B": "D6", "WISE 0855-0714": "D6",
+               "RW Aurigae": "D3", "R Draconis": "D3"}
 ALIASES = {
     "barnard": "Barnard's Star", "barnards star": "Barnard's Star", "barnard's star": "Barnard's Star",
     "gj 699": "Barnard's Star", "epsilon indi b": "Epsilon Indi B", "eps ind b": "Epsilon Indi B",
