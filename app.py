@@ -13,13 +13,13 @@ from astropy.time import Time
 
 from spx import archive, catalogs, config, cutouts, detect, photometry, render, stack, targets, viewer, warp
 
-st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="wide")
+st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
 
 PRESET_BAND = targets.PRESET_BAND
 MODES = {"blink": "Blink epochs", "add": "Add", "sub": "Subtract", "movie": "Every exposure",
          "spectrum": "Spectrum & light curve", "motion": "Motion check"}
-MODE_LABEL = {"blink": "▶ Blink", "add": "➕ Add", "sub": "➖ Subtract", "movie": "🎞 Every exposure",
-              "spectrum": "🌈 Spectrum", "motion": "🧭 Motion check"}
+MODE_LABEL = {"blink": "Blink", "add": "Add", "sub": "Subtract", "movie": "Every exposure",
+              "spectrum": "Spectrum", "motion": "Motion check"}
 MODE_HELP = {"blink": "flip between dates: movers jump", "add": "stack all dates: see faint things",
              "sub": "newer − older: see only what changed", "movie": "one frame per single photo",
              "spectrum": "brightness at each infrared colour", "motion": "does it move as predicted?"}
@@ -69,14 +69,14 @@ _init()
 def _input_hint(text):
     """One line under the search box saying how the text will be read."""
     if targets.preset(text):
-        st.caption("⭐ A challenge target (built-in catalogue values)")
+        st.caption("A challenge target (built-in catalogue values)")
     elif (t := targets.parse_coords(text)) is not None:
-        st.caption(f"📍 Read as a sky position: RA {t.ra:.5f}°, Dec {t.dec:+.5f}°")
+        st.caption(f"Read as a sky position: RA {t.ra:.5f}°, Dec {t.dec:+.5f}°")
     elif targets.looks_like_coords(text):
-        st.caption("⚠️ This looks like numbers but is not a valid position. Use two numbers in degrees: "
+        st.caption("Warning: this looks like numbers but is not a valid position. Use two numbers in degrees: "
                    "RA from 0 to 360, then Dec from −90 to +90, e.g. `269.452 4.693`.")
     elif text.strip():
-        st.caption("🔎 Will be looked up by name in the SIMBAD star catalogue")
+        st.caption("Will be looked up by name in the SIMBAD star catalogue")
 
 
 GLOSSARY = """
@@ -98,15 +98,15 @@ GLOSSARY = """
 
 # --- sidebar ------------------------------------------------------------------------
 with st.sidebar:
-    st.header("🔭 SPHEREx Blink")
+    st.header("SPHEREx Blink")
     st.markdown("**① What to look at**")
     st.text_input("Object name or sky position (RA Dec in degrees)", key="target_text",
                   placeholder="Barnard's Star  ·  M 42  ·  269.452 4.693",
                   help="Type the name of a star, galaxy or nebula (looked up in the SIMBAD catalogue), or a "
                        "sky position as two numbers in degrees: RA (0–360) then Dec (−90 to +90), for "
                        "example `269.452 4.693` or `269.452°, +4.693°`. Hours-minutes-seconds also work: "
-                       "`17 57 48.5 +04 41 36`. Press Enter or 🔍 Go.")
-    st.button("🔍 Go", type="primary", use_container_width=True, help="Load this object or position")
+                       "`17 57 48.5 +04 41 36`. Press Enter or Go.")
+    st.button("Go", type="primary", use_container_width=True, help="Load this object or position")
     _input_hint(ss.target_text)
     st.caption("…or pick a challenge target:")
     cols = st.columns(2)
@@ -131,7 +131,7 @@ with st.sidebar:
               help="Adds images from earlier infrared surveys before the SPHEREx frames, so motion over 15–25 "
                    "years becomes visible. Other telescopes: J → D1/D2, Ks → D3, W1 → D4, W2 → D5/D6.")
     st.caption("Brightness, contrast, speed and flagged pixels are set in the viewer itself.")
-    with st.expander("📖 Words used here"):
+    with st.expander("Words used here"):
         st.markdown(GLOSSARY)
     st.html(warp.SCRIPT, unsafe_allow_javascript=True)  # loading animation, installed once per page
 
@@ -204,18 +204,18 @@ st.segmented_control("View", list(MODES), key="mode", required=True, format_func
                      help="How to look at the photos:\n\n" + "\n".join(f"- **{MODE_LABEL[m]}**: {MODE_HELP[m]}"
                                                                        for m in MODES))
 st.caption(f"**{MODE_LABEL[ss.mode]}**: {MODE_HELP[ss.mode]}")
-with st.expander("❓ How to use this page (30 seconds)"):
+with st.expander("How to use this page (30 seconds)"):
     st.markdown(
         "1. **Choose a target** in the sidebar: a challenge target, any name (e.g. *M 42*), or a sky position "
-        "in degrees (e.g. `269.452 4.693`). Press **🔍 Go**.\n"
-        "2. **Press ▶ Play** under the image. The photos are months apart: a star that *jumps* is moving, one "
+        "in degrees (e.g. `269.452 4.693`). Press **Go**.\n"
+        "2. **Press Play** under the image. The photos are months apart: a star that *jumps* is moving, one "
         "that *flickers* changes brightness.\n"
         "3. **Switch the view** with the buttons above: *Subtract* shows only what changed, *Spectrum* shows "
         "colour, *Motion check* compares the measured path with the predicted one.\n"
-        "4. **📍 Mark** (in the viewer's toolbar): click to mark objects, draw lines to measure sizes and "
+        "4. **Mark** (in the viewer's toolbar): click to mark objects, draw lines to measure sizes and "
         "distances, and mark the same object on two dates to get its speed. *Compare* puts two dates side "
         "by side, under a swipe divider, or subtracts them.\n\n"
-        "Hover over the small ❔ icons for short explanations; *📖 Words used here* in the sidebar explains "
+        "Hover over the small question-mark icons for short explanations; *Words used here* in the sidebar explains "
         "the astronomy terms.")
 load = Loader()
 load.step("Finding your target…", "Reading the position you typed, or looking the name up in the SIMBAD catalogue", 0)
@@ -442,7 +442,7 @@ if ss.mode == "spectrum":
     if notes:
         st.markdown("**What changed?** (median of unflagged points; different wavelengths inside a band add "
                     "scatter)\n\n- " + "\n- ".join(notes)
-                    + ("\n\n⚠ The neighbouring star above moves relative to the target, so part of any change "
+                    + ("\n\nNote: the neighbouring star above moves relative to the target, so part of any change "
                        "can come from it entering or leaving the aperture." if close else ""))
     with st.expander("Table of measurements"):
         df = pd.DataFrame([{k: (", ".join(v) if k == "flags" else v) for k, v in r.items()
@@ -552,8 +552,8 @@ def gaia_on(mjd):
             if -2 < a < shape[1] + 1 and -2 < b < shape[0] + 1]
 
 
-COORD_NOTE = ("📍 You typed a sky position, so nothing is followed here (the orange cross marks the spot). "
-              "Look for anything that moves or changes yourself, then **📍 Mark** it on two dates to measure it.")
+COORD_NOTE = ("You typed a sky position, so nothing is followed here (the orange cross marks the spot). "
+              "Look for anything that moves or changes yourself, then **Mark** it on two dates to measure it.")
 
 
 def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None, follow=None):
@@ -600,7 +600,7 @@ def pending_notes():
         if arrived and ss.get(akey, 0) < 5 and time.time() - t_first < 600:
             ss[akey] = ss.get(akey, 0) + 1
             st.rerun()
-        st.info("⏳ " + "; ".join(msgs) + ". They are added here automatically as soon as they arrive.")
+        st.info("" + "; ".join(msgs) + ". They are added here automatically as soon as they arrive.")
     watch()
 
 
@@ -712,12 +712,12 @@ def motion_check(t, note=""):
                       help="Measured minus catalogue. σ (sigma) counts how many uncertainties apart they are: "
                            "below about 3σ they agree.")
         if t.has_motion:
-            verdict = (f"✅ **Agrees** with the catalogue: SPHEREx sees {t.name} move {mu:.2f}″ per year, "
+            verdict = (f"**Agrees** with the catalogue: SPHEREx sees {t.name} move {mu:.2f}″ per year, "
                        f"the catalogue says {cat_mu:.2f}″." if diff < 3 * ee + 0.1 * cat_mu else
-                       f"⚠ **Differs** from the catalogue by {diff:.2f}″/yr ({diff / ee:.1f}σ). Saturation "
+                       f"**Differs** from the catalogue by {diff:.2f}″/yr ({diff / ee:.1f}σ). Saturation "
                        "(an overexposed star), a blended neighbour or too few epochs can cause this; check the blink.")
         else:
-            verdict = (f"🚀 **Moves**: {mu:.2f} ± {ee:.2f}″/yr, more than 3× the uncertainty." if mu > 3 * ee else
+            verdict = (f"**Moves**: {mu:.2f} ± {ee:.2f}″/yr, more than 3× the uncertainty." if mu > 3 * ee else
                        f"No motion detected: less than about {3 * ee:.2f}″/yr (3σ).")
         st.markdown(verdict)
     st.caption("**Reading the plot:** each coloured point is where the object's light is centred in one photo "
@@ -726,7 +726,7 @@ def motion_check(t, note=""):
                "Saturated (overexposed) stars and blended neighbours make centres less reliable.")
 
     plx = t.parallax / 1000
-    with st.expander("🧮 How the prediction (grey line) and the measurement are calculated", expanded=False):
+    with st.expander("How the prediction (grey line) and the measurement are calculated", expanded=False):
         st.markdown(
             f"**The prediction** starts from the catalogue ({t.source}) and adds two effects:\n\n"
             f"1. **Proper motion** (the star's own drift): **{cat_e:+.3f}″/yr** east and **{cat_n:+.3f}″/yr** north. "
@@ -758,7 +758,7 @@ def motion_check(t, note=""):
                    "Miss = distance between the measured and predicted points.")
         st.download_button("Download this table (CSV)", df.to_csv(index=False),
                            f"motion_{t.name.replace(' ', '_')}_{band}.csv", help="Save the step-by-step numbers.")
-    with st.expander("▶ Watch it move: the photos with the predicted position (orange ring) on each date"):
+    with st.expander("Watch it move: the photos with the predicted position (orange ring) on each date"):
         sky_viewer(frames, key_extra=f"motion|{t.name}", follow=t)
 
 
@@ -854,8 +854,8 @@ if ss.mode == "motion":
         st.subheader(f"Motion check at {tgt.name} ({band})")
         st.info("A motion check compares where a **known object** is predicted to be with where SPHEREx sees it. "
                 "You typed a sky position, so nothing is followed here.\n\n"
-                "**Mark it yourself:** choose 📍 *Mark*, click an object on the first date, switch to a later "
-                "date with ▶ or the timeline, and click the *same* object again. The panel shows how far it moved "
+                "**Mark it yourself:** choose *Mark*, click an object on the first date, switch to a later "
+                "date with Next or the timeline, and click the *same* object again. The panel shows how far it moved "
                 "and its speed in ″ per year. Then **Check my find** below compares it with the Gaia catalogue.")
         check_my_find(sky_viewer(frames, key_extra="motion"), "motion")
         pending_notes()
@@ -868,7 +868,7 @@ if ss.mode == "motion":
 load_secs = load.done()
 if tgt.source == "coordinates":
     st.caption(COORD_NOTE)
-tab_view, tab_exp = st.tabs(["🔭 Sky viewer", "📋 Photo list"])
+tab_view, tab_exp = st.tabs(["Sky viewer", "Photo list"])
 with tab_view:
     mode = ss.mode
     diverging = False
@@ -961,7 +961,7 @@ with tab_view:
     pending_notes()
     check_my_find(my_marks, mode)
 
-    with st.expander("🧰 Helpers — off until you switch them on", expanded=bool(h_stars or h_change)):
+    with st.expander("Helpers — off until you switch them on", expanded=bool(h_stars or h_change)):
         st.caption("The app does not point things out by itself: look first, then let a helper check what you saw.")
         h1, h2, h3 = st.columns(3)
         h1.toggle("Detect stars", key="h_stars",
@@ -984,7 +984,7 @@ with tab_view:
                 p2.selectbox("…to (newer)", range(len(frames)), key="h_b", format_func=lambda i: labels[i],
                              help="The 'after' photo.")
             if any(frames[i].kind == "survey" for i in pair):
-                st.caption("⚠ One photo is from an older survey (another telescope, scaled for display): only "
+                st.caption("Note: one photo is from an older survey (another telescope, scaled for display): only "
                            "*moved* results mean something; brightness changes between telescopes do not.")
             if changed:
                 rows = []

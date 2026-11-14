@@ -97,8 +97,7 @@ SCRIPT = r"""<script>
 
 def card(title: str, detail: str = "", stage: int = 0, frac: float | None = None, prog_text: str = "") -> str:
     """The placeholder the script draws into, with the text on top. stage 0-3 = working, 4 = done."""
-    steps = "".join(f'<span class="{"done" if i < stage else "now" if i == stage else ""}">'
-                    f'{"✓" if i < stage else "●" if i == stage else "○"} {s}</span>'
+    steps = "".join(f'<span class="{"done" if i < stage else "now" if i == stage else ""}">{i + 1}. {s}</span>'
                     for i, s in enumerate(STAGES))
     bar = (f'<div class="spx-prog"><i style="width:{max(0.0, min(1.0, frac)) * 100:.1f}%"></i></div>'
            if frac is not None else "")

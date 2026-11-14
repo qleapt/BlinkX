@@ -40,9 +40,9 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
 .cards .x{position:absolute;left:0;top:0;pointer-events:none;background:transparent}
 </style></head><body>
 <div class="bar" role="toolbar" aria-label="Viewer tools">
-  <button id="tLook" title="Move the mouse to read positions; drag to move around a zoomed image (key V)">✋ Look</button>
-  <button id="tMark" title="Click on anything to put a numbered marker on it (key M)">📍 Mark</button>
-  <button id="tRuler" title="Click where a line starts and where it ends: shows its length on the sky (key L)">📏 Measure</button>
+  <button id="tLook" title="Move the mouse to read positions; drag to move around a zoomed image (key V)">Look</button>
+  <button id="tMark" title="Click on anything to put a numbered marker on it (key M)">Mark</button>
+  <button id="tRuler" title="Click where a line starts and where it ends: shows its length on the sky (key L)">Measure</button>
   <span class="sep"></span>
   <span class="lab">Compare</span>
   <select id="cmp" title="How to compare the dates">
@@ -53,9 +53,9 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
   <span class="lab">B</span><select id="selB" title="Photo B (the 'after')"></select>
 </div>
 <div class="bar">
-  <button id="prev" title="Previous photo (key ←)">◀</button>
-  <button id="play" title="Flip through the photos automatically (Space)">▶ Play</button>
-  <button id="next" title="Next photo (key →)">▶</button>
+  <button id="prev" title="Previous photo (key ←)">Prev</button>
+  <button id="play" title="Flip through the photos automatically (Space)">Play</button>
+  <button id="next" title="Next photo (key →)">Next</button>
   <span class="lab" title="Time each photo stays on screen while playing">Speed</span>
   <input type="range" id="speed" min="150" max="2000" step="50" title="Milliseconds per photo while playing">
   <label class="ck" title="Blend smoothly from one photo to the next instead of a hard flip"><input type="checkbox" id="fade"> Cross-fade</label>
@@ -64,7 +64,7 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
     <option value="asinh">asinh</option><option value="log">log</option><option value="sqrt">sqrt</option><option value="linear">linear</option></select>
   <span class="lab" title="Darkest level: raise it to hide noisy background">Dark</span><input type="range" id="blk" min="0" max="60" step="0.5" title="Dark level (percentile of all pixels shown as black)">
   <span class="lab" title="Brightest level: lower it to bring out faint things">Bright</span><input type="range" id="wht" min="90" max="100" step="0.05" title="Bright level (percentile of all pixels shown as white)">
-  <button id="zreset" title="Show the whole image again (key 0)">⤢ Fit</button>
+  <button id="zreset" title="Show the whole image again (key 0)">Fit</button>
 </div>
 <div class="bar">
   <label class="ck" title="Orange ring: where the target should be on each date (from its catalogue motion)"><input type="checkbox" id="oTgt" checked> Target ring</label>
@@ -95,9 +95,9 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
     <div style="margin-top:5px">Distance <input type="number" id="dist" min="0" step="any" placeholder="e.g. 1.8">
       <select id="dunit" aria-label="Distance unit"><option value="pc">parsecs</option><option value="ly">light-years</option></select></div>
     <div id="sizes" class="small" style="margin-top:5px"></div>
-    <h4>Save</h4><button id="csv" title="Download your marks and lines as a spreadsheet (CSV) file">⬇ Download CSV</button>
-    <button id="undo" title="Remove the last marker or line (key Z)">↶ Undo</button>
-    <button id="clear" title="Remove all markers and lines">🗑 Clear</button>
+    <h4>Save</h4><button id="csv" title="Download your marks and lines as a spreadsheet (CSV) file">Download CSV</button>
+    <button id="undo" title="Remove the last marker or line (key Z)">Undo</button>
+    <button id="clear" title="Remove all markers and lines">Clear</button>
     <p class="small">Keys: <span class="k">←</span><span class="k">→</span> photos · <span class="k">Space</span> play · <span class="k">M</span> mark · <span class="k">L</span> line · <span class="k">V</span> look · <span class="k">Z</span> undo · wheel = zoom · drag = move · <span class="k">0</span> fit.<br>
     1′ = 60″; one SPHEREx pixel is 6.15″, so a hand-placed mark is good to about one pixel; “Snap” does better on stars.</p>
   </div>
@@ -302,9 +302,9 @@ function draw() {
   overlays(g1, c1, i, dv);
   if (m === "side") tag(g1, "A", 0);
   if (m === "swipe") { const x = swipeX * c1.width; g1.strokeStyle = "#ffb000"; g1.lineWidth = 2; g1.beginPath(); g1.moveTo(x, 0); g1.lineTo(x, c1.height); g1.stroke();
-    g1.fillStyle = "#ffb000"; g1.beginPath(); g1.arc(x, c1.height / 2, 10, 0, 7); g1.fill(); g1.fillStyle = "#000"; g1.font = "bold 12px system-ui"; g1.fillText("⇔", x - 7, c1.height / 2 + 4);
+    g1.fillStyle = "#ffb000"; g1.beginPath(); g1.arc(x, c1.height / 2, 10, 0, 7); g1.fill();
     tag(g1, "A", 0); tag(g1, "B", c1.width - 24); }
-  const f = i >= 0 ? D.frames[i] : null, warn = f && f.flags && f.flags.length ? ' <span class="w">⚠ flags at target: ' + esc(f.flags.join(", ")) + "</span>" : "";
+  const f = i >= 0 ? D.frames[i] : null, warn = f && f.flags && f.flags.length ? ' <span class="w">Warning: flags at target: ' + esc(f.flags.join(", ")) + "</span>" : "";
   $("title").innerHTML = (m === "side" ? "A: " + esc(D.frames[A].label) + " &nbsp;|&nbsp; B: " + esc(D.frames[B].label)
     : m === "swipe" ? "A (left of the divider): " + D.frames[A].date + " · B (right): " + D.frames[B].date + " — drag the divider"
     : m === "diff" ? "Difference: " + D.frames[B].date + " minus " + D.frames[A].date
@@ -363,12 +363,12 @@ function thumbs() {   // comparison card: each mark on its own photo only, side 
 }
 function panel() {
   if (!D) return;
-  const tips = {mark: "📍 <b>Mark</b>: click on anything to put a numbered marker on it. Mark the <i>same</i> object on two dates (◀ ▶ or the timeline) to get how far — and how fast — it moved.",
-    ruler: "📏 <b>Measure</b>: click where the line starts, then where it ends. The length is the size of (or gap between) things <i>as seen on the sky</i>.",
-    look: "✋ <b>Look</b>: move the mouse to read the position and brightness of any pixel. Scroll to zoom, drag to move."};
+  const tips = {mark: "<b>Mark</b>: click on anything to put a numbered marker on it. Mark the <i>same</i> object on two dates (Prev / Next or the timeline) to get how far — and how fast — it moved.",
+    ruler: "<b>Measure</b>: click where the line starts, then where it ends. The length is the size of (or gap between) things <i>as seen on the sky</i>.",
+    look: "<b>Look</b>: move the mouse to read the position and brightness of any pixel. Scroll to zoom, drag to move."};
   $("tip").innerHTML = tips[tool] + (pending ? "<br><b>Now click the end point.</b>" : "");
   $("marks").innerHTML = marks.length ? marks.map((m, i) => `<div class="row"><b>#${i + 1}</b> · ${esc(m.date || "")}<br><span class="small">${fmtRD(sky(m))}</span></div>`).join("")
-    : '<div class="empty">Nothing marked yet. Choose 📍 Mark and click on the image.</div>';
+    : '<div class="empty">Nothing marked yet. Choose Mark and click on the image.</div>';
   let ph = "";
   for (let i = 1; i < marks.length; i++) { const a = marks[i - 1], b = marks[i], d = sepArc(a, b), ang = pa(a, b), yrs = Math.abs(b.mjd - a.mjd) / 365.25;
     ph += `<div class="row">#${i} → #${i + 1}: <span class="m">${fmtAng(d)}</span> toward the ${compass(ang)} (${ang.toFixed(0)}° from north)`;
@@ -377,7 +377,7 @@ function panel() {
   $("pairs").innerHTML = ph || '<div class="empty">' + (marks.length ? "Mark a second object (or the same object on another date) to measure between them." : "Nothing to measure between yet.") + "</div>";
   $("lines").innerHTML = lines.length ? lines.map((l, i) => { const d = sepArc(l.a, l.b);
       return `<div class="row"><span class="m">L${i + 1}</span>: ${fmtAng(d)} long, pointing ${compass(pa(l.a, l.b))}<br><span class="small">${(d / 6.15).toFixed(1)} SPHEREx pixels</span></div>`; }).join("")
-    : '<div class="empty">No lines yet. Choose 📏 Measure and click twice.</div>';
+    : '<div class="empty">No lines yet. Choose Measure and click twice.</div>';
   const dist = parseFloat($("dist").value), unit = $("dunit").value, S = $("sizes");
   const all = lines.map((l, i) => ["L" + (i + 1), sepArc(l.a, l.b)]).concat(marks.slice(1).map((m, i) => ["#" + (i + 1) + "→#" + (i + 2), sepArc(marks[i], m)]));
   if (!(dist > 0)) S.innerHTML = all.length ? "Type a distance to turn the angles into real sizes." : "";
@@ -411,9 +411,9 @@ function setFrame(i, fade) {
   if (fade && $("fade").checked && i !== cur) { fadeFrom = cur; fadeT0 = performance.now(); } else fadeFrom = -1;
   cur = (i + N) % N; draw(); }
 function step(d) { const s = seq(), k = s.indexOf(cur); setFrame(s[((k < 0 ? 0 : k) + d + s.length) % s.length], true); }
-function stop() { if (timer) { clearInterval(timer); timer = null; } $("play").textContent = "▶ Play"; $("play").classList.remove("on"); }
+function stop() { if (timer) { clearInterval(timer); timer = null; } $("play").textContent = "Play"; $("play").classList.remove("on"); }
 function start() { stop(); if (N < 2) return; const m = $("cmp").value; if (m !== "all" && m !== "ab") { $("cmp").value = "ab"; fit(); }
-  timer = setInterval(() => step(1), +$("speed").value); $("play").textContent = "❚❚ Pause"; $("play").classList.add("on"); }
+  timer = setInterval(() => step(1), +$("speed").value); $("play").textContent = "Pause"; $("play").classList.add("on"); }
 $("play").onclick = () => timer ? stop() : start();
 $("prev").onclick = () => { stop(); step(-1); }; $("next").onclick = () => { stop(); step(1); };
 $("speed").oninput = () => { if (timer) start(); };
