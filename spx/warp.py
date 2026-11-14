@@ -95,10 +95,11 @@ SCRIPT = r"""<script>
 </script>"""
 
 
-def card(title: str, detail: str = "", stage: int = 0, frac: float | None = None, prog_text: str = "") -> str:
+def card(title: str, detail: str = "", stage: int = 0, frac: float | None = None, prog_text: str = "",
+         stages=None) -> str:
     """The placeholder the script draws into, with the text on top. stage 0-3 = working, 4 = done."""
     steps = "".join(f'<span class="{"done" if i < stage else "now" if i == stage else ""}">{i + 1}. {s}</span>'
-                    for i, s in enumerate(STAGES))
+                    for i, s in enumerate(stages or STAGES))
     bar = (f'<div class="spx-prog"><i style="width:{max(0.0, min(1.0, frac)) * 100:.1f}%"></i></div>'
            if frac is not None else "")
     return (f'{CSS}<div class="spx-warp" data-stage="{int(stage)}" role="status" aria-live="polite">'

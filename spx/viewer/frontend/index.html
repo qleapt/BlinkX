@@ -104,6 +104,114 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
 </div>
 <script>
 "use strict";
+// English / Turkish for the viewer. The page is written in English; with Turkish chosen, a watcher translates
+// every text (and tooltip) as it appears or changes: exactly, or with templates where {} stands for any text.
+let LANG = "en";
+const TRL = {
+  "Look": "Bak", "Mark": "İşaretle", "Measure": "Ölç", "Compare": "Karşılaştır", "All dates (play)": "Tüm tarihler (oynat)",
+  "Blink A ↔ B": "Blink A ↔ B", "Side by side A | B": "Yan yana A | B", "Swipe A / B": "Kaydır A / B",
+  "Difference B − A": "Fark B − A", "Prev": "Önceki", "Play": "Oynat", "Pause": "Duraklat", "Next": "Sonraki",
+  "Speed": "Hız", "Cross-fade": "Yumuşak geçiş", "Dark": "Koyu", "Bright": "Parlak", "Fit": "Sığdır",
+  "Target ring": "Hedef halkası", "Gaia stars": "Gaia yıldızları", "Flagged pixels": "İşaretli pikseller",
+  "My marks": "İşaretlerim", "Detected stars": "Bulunan yıldızlar", "Changes": "Değişimler",
+  "Snap to star centre": "Yıldız merkezine yapıştır", "Marked objects": "İşaretli cisimler",
+  "Your marks, each on its own photo": "İşaretleriniz, her biri kendi fotoğrafında",
+  "Distances between marks": "İşaretler arası uzaklıklar", "Measured lines": "Ölçülen çizgiler",
+  "Real size (optional)": "Gerçek boyut (isteğe bağlı)", "Save": "Kaydet", "Download CSV": "CSV indir",
+  "Undo": "Geri al", "Clear": "Temizle", "Distance": "Uzaklık", "parsecs": "parsek", "light-years": "ışık yılı",
+  "If you know the distance, the angle gives a real size: size in AU (Earth–Sun distances) = angle in ″ × distance in parsecs.":
+    "Uzaklığı biliyorsanız açı gerçek boyutu verir: AU (Dünya–Güneş uzaklığı) cinsinden boyut = ″ cinsinden açı × parsek cinsinden uzaklık.",
+  "Move the mouse over the image to read the sky position and brightness.": "Gökyüzü konumunu ve parlaklığı okumak için fareyi resmin üzerinde gezdirin.",
+  "Blue = was brighter before (A)": "Mavi = önceden daha parlaktı (A)", "Red = brighter now (B)": "Kırmızı = şimdi daha parlak (B)",
+  "white / grey = no change": "beyaz / gri = değişim yok",
+  "<b>Mark</b>: click on anything to put a numbered marker on it. Mark the <i>same</i> object on two dates (Prev / Next or the timeline) to get how far — and how fast — it moved.":
+    "<b>İşaretle</b>: numaralı bir işaret koymak için herhangi bir şeye tıklayın. Ne kadar — ve ne hızla — hareket ettiğini bulmak için <i>aynı</i> cismi iki tarihte işaretleyin (Önceki / Sonraki veya zaman çizelgesi).",
+  "<b>Measure</b>: click where the line starts, then where it ends. The length is the size of (or gap between) things <i>as seen on the sky</i>.":
+    "<b>Ölç</b>: çizginin başladığı yere, sonra bittiği yere tıklayın. Uzunluk, cisimlerin <i>gökyüzünde görüldüğü</i> boyutu (veya aralarındaki boşluktur).",
+  "<b>Look</b>: move the mouse to read the position and brightness of any pixel. Scroll to zoom, drag to move.":
+    "<b>Bak</b>: herhangi bir pikselin konumunu ve parlaklığını okumak için fareyi gezdirin. Yakınlaştırmak için kaydırın, taşımak için sürükleyin.",
+  "<br><b>Now click the end point.</b>": "<br><b>Şimdi bitiş noktasına tıklayın.</b>",
+  "Nothing marked yet. Choose Mark and click on the image.": "Henüz işaret yok. İşaretle'yi seçin ve resme tıklayın.",
+  "Mark an object to see it here, on the photo you marked it on.": "Burada görmek için bir cismi işaretleyin; işaretlediğiniz fotoğrafta gösterilir.",
+  "Mark a second object (or the same object on another date) to measure between them.": "Aralarını ölçmek için ikinci bir cismi (veya aynı cismi başka bir tarihte) işaretleyin.",
+  "Nothing to measure between yet.": "Henüz aralarında ölçülecek bir şey yok.",
+  "No lines yet. Choose Measure and click twice.": "Henüz çizgi yok. Ölç'ü seçin ve iki kez tıklayın.",
+  "Type a distance to turn the angles into real sizes.": "Açıları gerçek boyutlara çevirmek için bir uzaklık yazın.",
+  "Measure a line or mark two objects first.": "Önce bir çizgi ölçün veya iki cisim işaretleyin.",
+  "Each mark on the photo you marked it on, nothing else. The crosshair is your mark; the number is the brightness there with the sky removed. Click one to show that photo.":
+    "Her işaret yalnızca işaretlendiği fotoğrafta. Artı işareti sizin işaretinizdir; sayı, gökyüzü çıkarılmış hâliyle oradaki parlaklıktır. O fotoğrafı göstermek için birine tıklayın.",
+  "Loading…": "Yükleniyor…", "Loading the photos… {} of {}": "Fotoğraflar yükleniyor… {} / {}",
+  "toward the {} ({}° from north)": "{} yönünde (kuzeyden {}°)", "{} years apart → moved": "{} yıl arayla → hareket:",
+  "{}″ per year": "yılda {}″", "— less than half a pixel, so probably no real motion": "— yarım pikselden az, bu yüzden muhtemelen gerçek hareket yok",
+  ": {} long, pointing {}": ": {} uzunluğunda, {} yönünde", "{} SPHEREx pixels": "{} SPHEREx pikseli",
+  "({} million km)": "({} milyon km)", "({} light-years)": "({} ışık yılı)",
+  "{} · {} MJy/sr · {}″ {}, {}″ {} of centre": "{} · {} MJy/sr · merkezin {}″ {}, {}″ {}",
+  "{} · no data · {}″ {}, {}″ {} of centre": "{} · veri yok · merkezin {}″ {}, {}″ {}",
+  "{} · change {} MJy/sr · {}″ {}, {}″ {} of centre": "{} · değişim {} MJy/sr · merkezin {}″ {}, {}″ {}",
+  "E": "doğusu", "W": "batısı", "N": "kuzeyi", "S": "güneyi",
+  "north": "kuzey", "north-east": "kuzeydoğu", "east": "doğu", "south-east": "güneydoğu", "south": "güney",
+  "south-west": "güneybatı", "west": "batı", "north-west": "kuzeybatı",
+  "A (left of the divider): {} · B (right): {} — drag the divider": "A (ayırıcının solu): {} · B (sağ): {} — ayırıcıyı sürükleyin",
+  "Difference: {} minus {}": "Fark: {} eksi {}", "Warning: flags at target: {}": "Uyarı: hedefte bayraklar: {}",
+  "Keys:": "Tuşlar:", "photos ·": "fotoğraflar ·", "play ·": "oynat ·", "mark ·": "işaretle ·", "line ·": "çizgi ·",
+  "look ·": "bak ·", "undo · wheel = zoom · drag = move ·": "geri al · tekerlek = yakınlaştır · sürükle = taşı ·", "fit.": "sığdır.",
+  "1′ = 60″; one SPHEREx pixel is 6.15″, so a hand-placed mark is good to about one pixel; “Snap” does better on stars.":
+    "1′ = 60″; bir SPHEREx pikseli 6,15″'dir, bu yüzden elle konan bir işaret yaklaşık bir piksel hassastır; yıldızlarda “Yapıştır” daha iyisini yapar.",
+  "How to compare the dates": "Tarihler nasıl karşılaştırılır", "Photo A (the 'before')": "Fotoğraf A ('önceki')",
+  "Photo B (the 'after')": "Fotoğraf B ('sonraki')", "Previous photo (key ←)": "Önceki fotoğraf (← tuşu)",
+  "Next photo (key →)": "Sonraki fotoğraf (→ tuşu)", "Flip through the photos automatically (Space)": "Fotoğrafları otomatik çevir (Boşluk)",
+  "Time each photo stays on screen while playing": "Oynatırken her fotoğrafın ekranda kalma süresi",
+  "Milliseconds per photo while playing": "Oynatırken fotoğraf başına milisaniye",
+  "Blend smoothly from one photo to the next instead of a hard flip": "Sert geçiş yerine bir fotoğraftan ötekine yumuşakça geç",
+  "Darkest level: raise it to hide noisy background": "En koyu düzey: gürültülü arka planı gizlemek için artırın",
+  "Brightest level: lower it to bring out faint things": "En parlak düzey: sönük cisimleri öne çıkarmak için azaltın",
+  "Show the whole image again (key 0)": "Tüm resmi yeniden göster (0 tuşu)",
+  "Remove the last marker or line (key Z)": "Son işareti veya çizgiyi kaldır (Z tuşu)", "Remove all markers and lines": "Tüm işaretleri ve çizgileri kaldır",
+  "Download your marks and lines as a spreadsheet (CSV) file": "İşaretlerinizi ve çizgilerinizi tablo (CSV) dosyası olarak indirin",
+  "Your markers and lines": "İşaretleriniz ve çizgileriniz",
+  "Move the mouse to read positions; drag to move around a zoomed image (key V)": "Konumları okumak için fareyi gezdirin; yakınlaştırılmış resimde dolaşmak için sürükleyin (V tuşu)",
+  "Click on anything to put a numbered marker on it (key M)": "Numaralı bir işaret koymak için herhangi bir şeye tıklayın (M tuşu)",
+  "Click where a line starts and where it ends: shows its length on the sky (key L)": "Çizginin başladığı ve bittiği yere tıklayın: gökyüzündeki uzunluğunu gösterir (L tuşu)",
+  "Moves your click to the light-weighted centre of the nearest bright spot, so marks land on the middle of a star":
+    "Tıklamanızı en yakın parlak noktanın ışık ağırlıklı merkezine taşır; böylece işaretler yıldızın ortasına düşer",
+  "Orange ring: where the target should be on each date (from its catalogue motion)": "Turuncu halka: hedefin her tarihte olması gereken yer (katalog hareketinden)",
+  "Blue circles: stars in ESA's Gaia catalogue, moved to each date. Hover one for details": "Mavi halkalar: ESA'nın Gaia kataloğundaki yıldızlar, her tarihe taşınmış. Ayrıntı için üzerine gelin",
+  "Pink: pixels the NASA pipeline marked as unreliable (overexposed, cosmic rays…)": "Pembe: NASA işlem hattının güvenilmez olarak işaretlediği pikseller (aşırı pozlama, kozmik ışınlar…)",
+};
+const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const TPL = Object.keys(TRL).filter(k => k.includes("{}"))
+  .sort((a, b) => b.replace(/\{\}/g, "").length - a.replace(/\{\}/g, "").length)
+  .map(k => [new RegExp("^" + k.split("{}").map(escRe).join("(.+?)") + "$", "s"), TRL[k]]);
+function L(s) {
+  if (LANG !== "tr" || typeof s !== "string") return s;
+  const k = s.trim(); if (!k) return s;
+  let out = TRL[k];
+  if (out === undefined) for (const [rx, t] of TPL) { const m = k.match(rx);
+    if (m) { let i = 0; const g = m.slice(1).map(x => TRL[x.trim()] !== undefined ? TRL[x.trim()] : x);
+      out = t.replace(/\{(\d*)\}/g, (_, n) => n ? g[+n] : g[i++]); break; } }
+  if (out === undefined) { out = k.replace(/\bEpoch (\d+)/g, "Dönem $1").replace(/ exp\b/g, " poz").replace(/\bmoved\b/g, "hareket etti");
+    if (out === k) return s; }
+  return s.replace(k, out);
+}
+let busy = false;
+function translateTree(root) {
+  if (LANG !== "tr" || busy) return; busy = true;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) { const p = n.parentNode && n.parentNode.nodeName;
+    if (p === "SCRIPT" || p === "STYLE") continue; const t = L(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; }
+  (root.querySelectorAll ? root.querySelectorAll("[title]") : []).forEach(el => { const t = L(el.title); if (t !== el.title) el.title = t; });
+  busy = false;
+}
+new MutationObserver(ms => { if (LANG !== "tr" || busy) return; for (const m of ms) translateTree(m.target.nodeType === 1 ? m.target : m.target.parentNode || document.body); })
+  .observe(document.documentElement, {childList: true, subtree: true, characterData: true});
+function setLang(lg) {
+  if (lg === LANG) return;
+  if (LANG === "tr" && lg === "en") { location.reload(); return; }   // back to English: start from the original page
+  LANG = lg; translateTree(document.body);
+}
+</script>
+<script>
+"use strict";
 // ---------- Streamlit component protocol (no build step) ----------
 const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data || {}), "*");
 let lastH = 0;
@@ -120,6 +228,7 @@ let view = {z: 1, vx: 0, vy: 0}, swipeX = 0.5, fadeFrom = -1, fadeT0 = 0, sample
 
 // ---------- data ----------
 function onRender(args) {
+  setLang((args.settings || {}).lang === "tr" ? "tr" : "en");
   const d = args.data; if (!d || !d.frames || !d.frames.length) return;
   const sig = [d.nx, d.ny, d.mode, d.title, d.frames.length, d.frames.map(f => f.png.length + ":" + f.png.slice(-24) + ":" + f.mjd).join(",")].join("|");
   if (sig === SIG) {                                         // same photos: keep zoom, frame and marks; refresh overlays only
@@ -286,7 +395,7 @@ function overlays(g, cv, i, diverging) {
     g.fillStyle = ink; g.font = "12px system-ui"; g.fillText("1′", 12 + bar / 2 - 5, cv.height - 20); }
   g.strokeStyle = ink; g.fillStyle = ink; g.lineWidth = 1.5; const ax = cv.width - 18, ay = cv.height - 16;
   g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax, ay - 28); g.moveTo(ax, ay); g.lineTo(ax - 28, ay); g.stroke();
-  g.font = "11px system-ui"; g.fillText("N", ax - 4, ay - 31); g.fillText("E", ax - 39, ay + 4);
+  g.font = "11px system-ui"; g.fillText(LANG === "tr" ? "K" : "N", ax - 4, ay - 31); g.fillText(LANG === "tr" ? "D" : "E", ax - 39, ay + 4);
 }
 function draw() {
   if (!D) return; const m = $("cmp").value; let i = cur, dv = D.diverging;
@@ -366,7 +475,7 @@ function panel() {
   const tips = {mark: "<b>Mark</b>: click on anything to put a numbered marker on it. Mark the <i>same</i> object on two dates (Prev / Next or the timeline) to get how far — and how fast — it moved.",
     ruler: "<b>Measure</b>: click where the line starts, then where it ends. The length is the size of (or gap between) things <i>as seen on the sky</i>.",
     look: "<b>Look</b>: move the mouse to read the position and brightness of any pixel. Scroll to zoom, drag to move."};
-  $("tip").innerHTML = tips[tool] + (pending ? "<br><b>Now click the end point.</b>" : "");
+  $("tip").innerHTML = L(tips[tool]) + (pending ? L("<br><b>Now click the end point.</b>") : "");
   $("marks").innerHTML = marks.length ? marks.map((m, i) => `<div class="row"><b>#${i + 1}</b> · ${esc(m.date || "")}<br><span class="small">${fmtRD(sky(m))}</span></div>`).join("")
     : '<div class="empty">Nothing marked yet. Choose Mark and click on the image.</div>';
   let ph = "";

@@ -62,6 +62,7 @@ The app is ready for [Streamlit Community Cloud](https://streamlit.io/cloud): on
 | `band` | SPHEREx band D1 … D6 | `&band=D6` |
 | `mode` | `blink`, `add`, `sub`, `movie`, `spectrum`, `motion` | `&mode=sub` |
 | `gaia`, `old` | `0` skips loading Gaia stars / older surveys | `&old=0` |
+| `lang` | page language: `en` (English) or `tr` (Türkçe); also in the sidebar | `&lang=tr` |
 
 The page writes its current settings back to the address bar, so you can copy and share any view.
 

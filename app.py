@@ -11,9 +11,11 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from astropy.time import Time
 
-from spx import archive, catalogs, config, cutouts, detect, photometry, render, stack, targets, viewer, warp
+from spx import archive, catalogs, config, cutouts, detect, i18n, photometry, render, stack, targets, viewer, warp
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
+# English / Turkish: everything Streamlit shows goes through i18n.tr() when Turkish is chosen
+i18n.install(lambda: st.session_state.get("lang", "en"))
 
 PRESET_BAND = targets.PRESET_BAND
 MODES = {"blink": "Blink epochs", "add": "Add", "sub": "Subtract", "movie": "Every exposure",
@@ -57,6 +59,8 @@ def _init():
     ss.gaia = qp.get("gaia", "1") != "0"
     ss.survey = qp.get("old", "1") != "0"
     ss.showflags = False
+    lang = str(qp.get("lang", "en")).lower()
+    ss.lang = lang if lang in i18n.LANGS else "en"
 
 
 def _pick(name):
@@ -97,7 +101,11 @@ GLOSSARY = """
 """
 
 # --- sidebar ------------------------------------------------------------------------
+i18n.GLOSSARY_EN = GLOSSARY
+
 with st.sidebar:
+    st.segmented_control("Language / Dil", list(i18n.LANGS), key="lang", required=True, format_func=i18n.LANGS.get,
+                         help="English or Turkish / İngilizce veya Türkçe")
     st.header("SPHEREx Blink")
     st.markdown("**① What to look at**")
     st.text_input("Object name or sky position (RA Dec in degrees)", key="target_text",
@@ -145,7 +153,7 @@ else:
     for _k in ("ra", "dec"):
         qp.pop(_k, None)
     qp["target"] = ss.target_text
-qp["fov"], qp["band"], qp["mode"] = str(ss.fov), ss.band, ss.mode
+qp["fov"], qp["band"], qp["mode"], qp["lang"] = str(ss.fov), ss.band, ss.mode, ss.lang
 
 
 # --- data -------------------------------------------------------------------------------
@@ -166,8 +174,9 @@ class Loader:
         self.title, self.detail, self.stage, self.frac, self.ptext = "", "", 0, None, ""
 
     def _draw(self):
-        self.box.markdown(warp.card(self.title, self.detail, self.stage, self.frac, self.ptext),
-                          unsafe_allow_html=True)
+        T = lambda s: i18n.tr(s, ss.lang)  # noqa: E731  (the card is HTML, so it is translated here)
+        self.box.markdown(warp.card(T(self.title), T(self.detail), self.stage, self.frac, T(self.ptext),
+                                    stages=[T(s) for s in warp.STAGES]), unsafe_allow_html=True)
 
     def step(self, title, detail="", stage=0):
         if stage != self.stage:
@@ -567,7 +576,7 @@ def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=
     store = f"{tgt.name}|{ss.fov}|{band}|{key_extra}"
     first_sphx = len(shown_frames) - len(sphx_frames) if len(shown_frames) == len(frames) else 0
     res = viewer.show(data, key=f"viewer|{ss.mode}", store_key=store,
-                      settings=dict(stretch=ss.stretch, speed=ss.speed, gaia=False, flags=ss.showflags,
+                      settings=dict(stretch=ss.stretch, speed=ss.speed, gaia=False, flags=ss.showflags, lang=ss.lang,
                                     a=first_sphx))
     if isinstance(res, dict) and res.get("key") == "spx-measure:" + store:
         ss["_marks"] = dict(res, store=store)
