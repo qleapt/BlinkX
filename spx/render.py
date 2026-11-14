@@ -52,8 +52,12 @@ def _marks_traces(marks):
     return out
 
 
+FLAG_COLOR = "rgba(255,40,120,0.45)"
+
+
 def animation(frames, kind: str = "asinh", marks_per_frame=None, diverging: bool = False,
-              arcsec_per_px: float = 3.075, duration_ms: int = 700, height: int = 640):
+              arcsec_per_px: float = 3.075, duration_ms: int = 700, height: int = 640,
+              show_flags: bool = False):
     lo, hi = limits(frames, diverging)
     ny, nx = frames[0].image.shape
     marks_per_frame = marks_per_frame or [[] for _ in frames]
@@ -64,7 +68,12 @@ def animation(frames, kind: str = "asinh", marks_per_frame=None, diverging: bool
         heat = go.Heatmap(z=z, customdata=f.image, colorscale=DIVERGING if diverging else GRAY,
                           zmin=-1 if diverging else 0, zmax=1, showscale=False,
                           hovertemplate="x %{x}, y %{y}<br>%{customdata:.4g} MJy/sr<extra></extra>")
-        return [heat] + _marks_traces(marks_per_frame[i])
+        out = [heat]
+        if show_flags:  # always one trace per frame so the animation stays consistent
+            m = f.flag_mask if f.flag_mask is not None else np.zeros_like(f.image, bool)
+            out.append(go.Heatmap(z=np.where(m, 1.0, np.nan), colorscale=[[0, FLAG_COLOR], [1, FLAG_COLOR]],
+                                  showscale=False, hoverinfo="skip", name="flagged pixels"))
+        return out + _marks_traces(marks_per_frame[i])
 
     def title(i):
         f = frames[i]

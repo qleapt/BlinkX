@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from spx import archive, config, cutouts, render, stack, targets
+from spx import archive, catalogs, config, cutouts, render, stack, targets
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="wide")
 
@@ -38,6 +38,8 @@ def _init():
     ss.mode = m if m in MODES else "blink"
     ss.stretch = "asinh"
     ss.speed = 700
+    ss.gaia = qp.get("gaia", "1") != "0"
+    ss.showflags = False
 
 
 def _pick(name):
@@ -59,6 +61,9 @@ with st.sidebar:
     st.radio("Field of view (arcmin)", config.FOV_CHOICES, key="fov", horizontal=True)
     st.selectbox("Band", list(config.BANDS), key="band", format_func=BAND_LABEL.get)
     st.radio("View", list(MODES), key="mode", format_func=MODES.get)
+    st.toggle("Gaia DR3 stars (moved to each date)", key="gaia")
+    st.toggle("Show flagged pixels", key="showflags",
+              help="Pink: the shown value comes from pixels the pipeline flagged (saturation, cosmic rays…).")
     with st.expander("Display"):
         st.selectbox("Stretch", render.STRETCHES, key="stretch")
         st.slider("Frame time (ms)", 200, 2000, key="speed", step=100)
@@ -148,6 +153,33 @@ def target_mark(mjd):
                 color="#ffb000", size=22, text=[f"{tgt.name} predicted on {targets.mjd_to_date(mjd)}"])
 
 
+@st.cache_data(ttl=7 * 24 * 3600, show_spinner=False)
+def gaia(ra, dec, r):
+    return catalogs.gaia_cone(ra, dec, r)
+
+
+gaia_stars, gaia_note = [], ""
+if ss.gaia:
+    try:
+        with st.spinner("Loading Gaia DR3 stars…"):
+            gaia_stars, src = gaia(round(ra0, 4), round(dec0, 4), round(ss.fov / 60 * 0.75, 3))
+        gaia_note = f"{len(gaia_stars)} Gaia DR3 stars (G < {config.GAIA_MAX_G:g}, via {src})"
+    except Exception:
+        gaia_note = "Gaia catalogue unavailable right now."
+gaia_text = [catalogs.gaia_hover(s) for s in gaia_stars]
+
+
+def gaia_mark(mjd):
+    r, d = catalogs.gaia_at(gaia_stars, mjd)
+    x, y = wgrid.world_to_pixel_values(r, d) if len(r) else ([], [])
+    return dict(x=list(np.atleast_1d(x)), y=list(np.atleast_1d(y)), name="Gaia DR3", symbol="circle-open",
+                color="#38d0ff", size=9, text=gaia_text)
+
+
+def marks_for(mjd):
+    return [target_mark(mjd)] + ([gaia_mark(mjd)] if ss.gaia and gaia_stars else [])
+
+
 tab_view, tab_exp = st.tabs(["Blink", "Exposures"])
 with tab_view:
     mode = ss.mode
@@ -172,8 +204,8 @@ with tab_view:
         al = archive.evenly(al, config.MOVIE_CAP)
         shown = [stack.single_frame(a, i + 1) for i, a in enumerate(al)]
 
-    marks = [[target_mark(f.mjd_mid)] for f in shown]
-    fig = render.animation(shown, ss.stretch, marks, diverging, arcsec_px, ss.speed)
+    marks = [marks_for(f.mjd_mid) for f in shown]
+    fig = render.animation(shown, ss.stretch, marks, diverging, arcsec_px, ss.speed, show_flags=ss.showflags)
     st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
     c1, c2, c3 = st.columns([2, 2, 3])
@@ -203,4 +235,4 @@ with tab_exp:
 last, versions = archive.data_through(exps)
 st.caption(f"{tgt.name}: RA {ra0:.5f}, Dec {dec0:+.5f} on 2026-01-01 ({tgt.source}). "
            f"SPHEREx data through {targets.mjd_to_date(last)} · processing {', '.join(versions)} · "
-           "Data: NASA/IPAC Infrared Science Archive (IRSA).")
+           f"{gaia_note} · Data: NASA/IPAC Infrared Science Archive (IRSA), ESA Gaia.")

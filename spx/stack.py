@@ -32,6 +32,7 @@ class Aligned:
     weight: np.ndarray     # 1/variance, 0 where bad
     stamp: Stamp
     bad_near_target: list = field(default_factory=list)
+    flagged: np.ndarray | None = None  # bad-flagged pixels on the grid
 
 
 def clean(st: Stamp, bad_names=None):
@@ -76,8 +77,9 @@ def align(st: Stamp, out_wcs: WCS, shape, bad_names=None) -> Aligned:
         s, _ = reproject_interp((suspect.astype(float), w_in), out_wcs, shape_out=shape, order="bilinear")
     a[fp == 0] = np.nan
     wt = np.where(np.isfinite(a) & np.isfinite(v) & (v > 0), 1.0 / np.where(v > 0, v, 1), 0.0)
-    wt = np.where(np.nan_to_num(s) > 0, wt * config.SUSPECT_WEIGHT, wt)
-    return Aligned(a, wt, st)
+    flagged = np.nan_to_num(s) > 0
+    wt = np.where(flagged, wt * config.SUSPECT_WEIGHT, wt)
+    return Aligned(a, wt, st, flagged=flagged)
 
 
 def fill_holes(img: np.ndarray, passes: int = 3) -> np.ndarray:
@@ -117,6 +119,7 @@ class Frame:
     kind: str = "stack"        # stack | single | survey | diff | sum
     flags: list = field(default_factory=list)
     stamps: list = field(default_factory=list)
+    flag_mask: np.ndarray | None = None  # pixels where the shown value comes from flagged data
 
     @property
     def mjd_mid(self) -> float:
@@ -147,21 +150,32 @@ def stack_frame(items: list[Aligned], label_prefix: str = "") -> Frame:
     flags = sorted({f for a in items for f in a.bad_near_target})
     wl = f" · {min(wls):.2f}–{max(wls):.2f} µm" if wls else ""
     label = f"{label_prefix}{date_range(min(mjds), max(mjds))} · {band} · {len(items)} exp{wl}"
+    fm = None
+    if all(a.flagged is not None for a in items):
+        # flagged in every exposure that has data there -> the stack shows flagged data
+        fm = np.all([a.flagged | ~np.isfinite(a.image) for a in items], axis=0) & \
+            np.any([np.isfinite(a.image) for a in items], axis=0)
     return Frame(img, label, band, min(mjds), max(mjds), len(items),
                  min(wls) if wls else np.nan, max(wls) if wls else np.nan, "stack", flags,
-                 [a.stamp for a in items])
+                 [a.stamp for a in items], fm)
+
+
+def _or_masks(frames):
+    ms = [f.flag_mask for f in frames if f.flag_mask is not None]
+    return np.any(ms, axis=0) if ms else None
 
 
 def single_frame(a: Aligned, i: int) -> Frame:
     st = a.stamp
     wl = f" · {st.wavelength:.3f} µm" if np.isfinite(st.wavelength) else ""
     return Frame(fill_holes(a.image), f"#{i} {mjd_to_date(st.mjd)} · {st.band}{wl}", st.band, st.mjd, st.mjd_end, 1,
-                 st.wavelength, st.wavelength, "single", a.bad_near_target, [st])
+                 st.wavelength, st.wavelength, "single", a.bad_near_target, [st], a.flagged)
 
 
 def subtract(b: Frame, a: Frame) -> Frame:
     return Frame(b.image - a.image, f"{b.label.split(' · ')[0]}  minus  {a.label.split(' · ')[0]} · {a.band}",
-                 a.band, a.mjd_start, b.mjd_end, a.n + b.n, kind="diff")
+                 a.band, a.mjd_start, b.mjd_end, a.n + b.n, kind="diff", flag_mask=_or_masks([a, b]),
+                 flags=sorted(set(a.flags) | set(b.flags)))
 
 
 def add(frames: list[Frame]) -> Frame:
@@ -169,4 +183,5 @@ def add(frames: list[Frame]) -> Frame:
     img = weighted_mean([f.image for f in frames], w)
     return Frame(img, f"All epochs added · {frames[0].band} · {sum(f.n for f in frames)} exp",
                  frames[0].band, min(f.mjd_start for f in frames), max(f.mjd_end for f in frames),
-                 sum(f.n for f in frames), kind="sum")
+                 sum(f.n for f in frames), kind="sum", flag_mask=_or_masks(frames),
+                 flags=sorted({x for f in frames for x in f.flags}))

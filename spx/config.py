@@ -14,7 +14,12 @@ IRSA = "https://irsa.ipac.caltech.edu"
 TAP_URL = f"{IRSA}/TAP/sync"
 ARTIFACT_TABLE = "spherex.artifact"
 PLANE_TABLE = "spherex.plane"
-SPECTROPHOTOMETRY_TOOL = "https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry"
+GAIA_TAP = "https://gea.esac.esa.int/tap-server/tap/sync"
+VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
+GAIA_MAX_G = 19.0
+GAIA_TOP = 800
+GAIA_REF_MJD = 57388.5  # Gaia DR3 epoch 2016.0
+SPECTROPHOTOMETRY_TOOL ="https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry"
 
 # --- Instrument ----------------------------------------------------------------
 # band: (min um, max um, resolving power)
