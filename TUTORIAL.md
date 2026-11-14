@@ -48,20 +48,27 @@ Your browser opens at **http://localhost:8501**.
 | **Challenge targets** | Five ready-made examples, one click each. |
 | **Field of view** | How much sky you see: 3, 5, 10 or 15 *arcminutes*. Bigger shows more neighbours. |
 | **Band** | Which slice of infrared light, D1 (0.75 µm, near red) to D6 (5 µm, warm-object light). |
-| **View** | Blink epochs · Add · Subtract · Every exposure · Spectrum & light curve · Motion check. |
-| **Gaia DR3 stars** | Cyan circles: stars from ESA's Gaia catalogue, moved to each picture's date. |
+| **Load the Gaia star list** | Fetches ESA's Gaia stars; tick *Gaia stars* in the viewer to see them. |
 | **Older surveys** | Adds 2MASS (~2000) and WISE (2010) pictures before the SPHEREx ones. |
-| **Show flagged pixels** | Pink: pixels the NASA pipeline marked as unreliable (often a saturated star). |
-| **Display** | Contrast *stretch* and animation speed. |
 
-**Main area**
+**Top of the page: the view buttons** ▶ Blink · ➕ Add · ➖ Subtract · 🎞 Every exposure · 🌈 Spectrum · 🧭 Motion check.
+
+**The sky viewer** (all picture views)
 
 - The **picture**: north is up, east is left (that's how the sky looks from below). The white bar is 1 arcminute.
-- The **orange circle**: where your target should be on that date, from its catalogue motion.
-- **▶ Play / ❚❚ Pause** and the **slider** below the picture: step through the frames.
+- The **orange ring**: where your target should be on that date, from its catalogue motion.
+- **▶ Play**, **◀ ▶** and the **timeline** under the picture (real dates; long gaps are squeezed, marked ≈).
+  **Speed** and **Cross-fade** set how it plays.
+- **Dark / Bright** and the stretch menu change brightness and contrast instantly. Scroll to zoom, drag to move,
+  **⤢ Fit** to see everything again.
+- **Compare:** *Blink A ↔ B* flips two dates you pick, *Side by side* shows them next to each other with a linked
+  crosshair, *Swipe* puts a divider you drag across, *Difference* subtracts them (red = brighter now, blue = was
+  brighter before).
+- Tick boxes: *Target ring*, *Gaia stars*, *Flagged pixels* (pink: pixels the NASA pipeline marked as unreliable,
+  often a saturated star), *My marks*.
 - The **title** of each frame: which *epoch*, dates, band, number of exposures averaged, and wavelength range.
   A ⚠ means the pipeline flagged pixels at the target, usually because it is too bright.
-- Hover over the picture to read the brightness of any pixel.
+- The line under the picture reads the position and brightness of the pixel under the mouse.
 
 ---
 
@@ -71,13 +78,14 @@ Barnard's Star is the fastest-moving star in our sky. It is a small red dwarf ju
 
 1. Click **Barnard's Star** in the sidebar. The first load takes up to a minute while the tool fetches the
    pictures from NASA's archive. The status line shows progress.
-2. Press **▶ Play**. Watch the bright star in the orange circle: it creeps **upward (north)** from frame to frame,
+2. Press **▶ Play**. Watch the bright star in the orange ring: it creeps **upward (north)** from frame to frame,
    while the other stars stay put.
 3. That shift is only about **5 arcseconds per six months**, less than one SPHEREx pixel (6.15″). You can still see
    it because the tool averages several exposures per epoch and draws the picture at twice the detector resolution.
-4. Switch **View → Subtract (B − A)**. This shows the newest epoch minus the oldest. Stars that did not move cancel
-   to grey. Barnard's Star leaves a **light spot** (where it is now) next to a **dark spot** (where it was).
-5. Turn on **Show flagged pixels**. The star's centre turns pink: it is so bright that it *saturates* the detector.
+4. Choose **➖ Subtract** at the top (or *Compare → Difference* in the viewer). This shows the newest epoch minus the
+   oldest. Stars that did not move cancel to white. Barnard's Star leaves a **red spot** (where it is now) next to a
+   **blue spot** (where it was).
+5. Tick **Flagged pixels** in the viewer. The star's centre turns pink: it is so bright that it *saturates* the detector.
    The tool still shows it, but warns you.
 
 **Try:** set the field of view to **10′** and View back to **Blink**. The first frame is now a WISE picture from
@@ -94,7 +102,7 @@ almost no visible or near-infrared light, only "warm" infrared around 4–5 µm.
 2. Set the field of view to **10′** and press **▶ Play**.
 3. The first frame is **WISE, May 2010**. The orange circle (and the faint dot inside it) sits about **127″ east
    (left)** of the picture's centre. Then come the SPHEREx epochs (2025–2026): circle and brown dwarf have jumped
-   to the centre. Use the slider to flip between the first and the last frame.
+   to the centre. Choose *Compare → Blink A ↔ B* to flip between the first and the last frame.
 4. Now change the band to **D1** (0.75–1.1 µm). At the predicted position you will see a different, ordinary star.
    WISE 0855 itself is invisible at these short wavelengths: a direct sign of how cold it is.
 
@@ -108,7 +116,7 @@ as more than 8 arcseconds per year.
 Epsilon Indi B is a pair of brown dwarfs orbiting the star Epsilon Indi A, 12 light-years away. SPHEREx sees the
 pair as one dot.
 
-1. Click **Epsilon Indi B**, then **View → Motion check**.
+1. Click **Epsilon Indi B**, then **🧭 Motion check** at the top.
 2. The chart is a map of the sky around the target (east to the left). The **grey line** is the path the catalogue
    predicts: a steady drift (*proper motion*) plus a small yearly loop (*parallax*, caused by Earth going around
    the Sun).
@@ -128,9 +136,10 @@ Every SPHEREx exposure of a given spot sees it through a slightly different colo
 colour across the field). Put many exposures together and you get a **spectrum**: brightness against wavelength.
 
 1. Click **RW Aurigae** (a young star still surrounded by its dusty disk, known for sudden dimming events), then
-   **View → Spectrum & light curve**. The tool fetches pictures in **all six bands**; this takes a minute or two
+   **🌈 Spectrum** at the top. The tool fetches pictures in **all six bands**; this takes a minute or two
    the first time.
 2. **Top chart: spectrum.** Each dot is one exposure; colours are epochs. Hover for date, wavelength and error.
+   **Dates to show** lets you compare two dates directly.
    **Hollow dots** had flagged pixels in the measurement (here the star is bright, so all are flagged: treat the
    numbers as indicative).
 3. **Second chart: light curve** for the band chosen in the sidebar: brightness against time.
@@ -150,20 +159,19 @@ which still rises and falls with the star. It shows the trend, not a calibrated 
 
 - **Any object:** type a name SIMBAD knows (`Vega`, `M 42`, `Proxima Cen`, `Betelgeuse`, `RR Lyr`) or coordinates.
 - **Fast movers in our Solar System (asteroids, comets):** they move within hours, not months. Choose
-  **View → Every exposure** and order **by time**. You see single exposures instead of epoch averages.
+  **🎞 Every exposure** and order **by time**. You see single exposures instead of epoch averages.
 - **Colour changes:** **Every exposure** ordered **by wavelength** flips through the colours of one spot.
-- **Deepest picture:** **View → Add** averages all epochs to bring out faint sources.
+- **Deepest picture:** **➕ Add** averages the dates you pick and says how much deeper the result is.
 
 Ideas: the closest star (Proxima Centauri) moves almost 4″ per year. Bright nebulae look different at
 1 µm and at 4 µm. Find a star that changed brightness between epochs.
 
-### Mark & measure (works everywhere, made for typed positions)
+### Mark, measure and check your find (works everywhere, made for typed positions)
 
 A position you type (e.g. `201.365 -43.019`) has no catalogued star to follow, so there is no predicted
-path to check. Open the **📍 Mark & measure** tab above the picture (in **Motion check** it appears
-directly):
+path to check. The app does not point anything out: you look, then the tools measure. In the viewer:
 
-- **📍 Mark object:** click anything to drop a numbered marker. With **Snap to star centre** on, the
+- **📍 Mark:** click anything to drop a numbered marker. With **Snap to star centre** on, the
   marker jumps to the middle of the nearest star. The panel lists each marker's RA and Dec.
 - **Distances between marks:** the separation (″) and direction between consecutive markers. Mark the
   *same* star on two dates (switch photos with ◀ ▶) and it also shows the **speed in ″ per year**.
@@ -171,8 +179,16 @@ directly):
 - **📏 Measure (line):** click the start, then the end. The line's length on the sky is shown on the image.
 - **Real size:** type the object's distance (parsecs or light-years) to turn angles into AU and km
   (size in AU = angle in ″ × distance in pc).
-- With no markers the panel says *No marked sky object*. **Undo** / **Clear all** remove marks;
+- **Same spot on every date:** a row of small pictures of your last mark on each date, with a fixed crosshair and
+  the brightness there (sky removed). Click one to show that date.
+- With no markers the panel says *Nothing marked yet*. **Undo** / **Clear** remove marks;
   **Download CSV** saves them. Marks stay on your computer only.
+- **🔎 Check my find** (under the viewer): pick a mark and the app looks for a Gaia star at that spot *on that
+  date*. If there is one, the Motion check compares its catalogue path with what SPHEREx measured; **🌈 Its
+  spectrum** measures its colours. If Gaia has nothing there, the app says so and shows SPHEREx's own motion.
+- **🧰 Helpers** (under the viewer, off until you switch them on): *Detect stars* draws green crosses on the stars
+  it finds; *Find what changed* lists what moved, brightened or faded between two dates, strongest first, labelled
+  C1, C2… on the picture. Check each one by eye.
 
 ---
 
@@ -182,7 +198,7 @@ directly):
   `http://localhost:8501/?target=WISE+0855&band=D6&fov=10&mode=blink`
   (`mode` can be `blink`, `add`, `sub`, `movie`, `spectrum`, `motion`).
 - **Animated GIF:** **Download GIF** under the picture, for slides and social media.
-- **Data:** the **Exposures** tab lists every picture used, with a link to the original NASA file. The spectrum
+- **Data:** the **📋 Photo list** tab lists every picture used, with a link to the original NASA file. The spectrum
   view exports a CSV.
 - **Embed in a website:** see the iframe snippet in the [README](README.md#link-to-a-view-url-parameters).
 
@@ -204,7 +220,7 @@ directly):
 
 | Problem | What to do |
 |---|---|
-| First load takes 30–60 s | Normal on a slow or distant connection. The app shows the picture once every epoch has a photo; the rest keep downloading, press **🔄 Refresh** to add them. The second time it is instant (cached). |
+| First load takes 30–60 s | Normal on a slow or distant connection. The app shows the picture once every epoch has a photo; the rest keep downloading and are added automatically when they arrive. The second time it is instant (cached). |
 | Coordinates are not recognised | Use two numbers in degrees, RA (0–360) then Dec (−90 to +90): `269.452 4.693`, `269.452°, +4.693°` and `RA=269.452 Dec=4.693` all work. The line under the box shows how your text was read. |
 | "The NASA/IPAC archive is busy" | Wait a minute and reload. |
 | "Could not find …" | Check the spelling, try another name (e.g. `HD 209100`), or type coordinates in degrees. |

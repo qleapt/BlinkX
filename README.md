@@ -20,8 +20,18 @@ bulk-downloaded, and new SPHEREx data appear automatically as the archive is upd
 | **Spectrum & light curve** | Brightness in all six bands (0.75–5 µm) against wavelength, coloured by epoch, and against time. A plain-language "what changed?" summary. |
 | **Motion check** | Where the target's light is centred in each frame, against the track predicted from its catalogue (Gaia) proper motion and parallax, with a verdict. |
 
-Overlays: the predicted position of the target on each date (orange), Gaia DR3 stars moved to each date (cyan,
-hover for brightness, motion and distance), and pixels the pipeline flagged (pink, e.g. saturation).
+All image views draw in one **sky viewer** in the browser: brightness, contrast and stretch change instantly
+(the page receives the pixel values, not pictures), zoom with the wheel, drag to move, a timeline with the real
+dates, and **Compare**: blink two dates, side by side with a linked crosshair, a swipe divider, or the difference.
+Overlays: the predicted position of the target on each date (orange), Gaia DR3 stars moved to each date (blue,
+hover for brightness, motion and distance; off until you tick them) and flagged pixels (pink, e.g. saturation).
+
+**You find things; the tools measure them.** Nothing is pointed out by default. Mark what you see (it snaps to
+the star's centre): the viewer gives positions, distances, directions and speed between dates, a card with that
+spot on every date and its brightness, and real sizes from a distance. **Check my find** matches a mark to the
+nearest Gaia star on the mark's date and runs the motion check on it, or shows its spectrum; with no Gaia match it
+says so and shows SPHEREx's own measurement. Optional **helpers**, off until switched on: star detection, and
+*Find what changed* (moved / brightened / faded, strongest first, allowing for all stars brightening together).
 Each view can be downloaded (GIF, CSV).
 
 ## Run it
@@ -51,7 +61,7 @@ The app is ready for [Streamlit Community Cloud](https://streamlit.io/cloud): on
 | `fov` | field of view in arcmin: 3, 5, 10, 15 | `&fov=10` |
 | `band` | SPHEREx band D1 … D6 | `&band=D6` |
 | `mode` | `blink`, `add`, `sub`, `movie`, `spectrum`, `motion` | `&mode=sub` |
-| `gaia`, `old` | `0` hides Gaia stars / older surveys | `&old=0` |
+| `gaia`, `old` | `0` skips loading Gaia stars / older surveys | `&old=0` |
 
 The page writes its current settings back to the address bar, so you can copy and share any view.
 
@@ -121,7 +131,10 @@ spx/cutouts.py      throttled partial-stream download, FITS parsing, wavelength,
 spx/stack.py        background removal, reprojection, stacks, add / subtract, survey frames
 spx/photometry.py   aperture photometry, centroids, motion fit
 spx/catalogs.py     Gaia DR3 (Gaia archive, VizieR fallback), WISE 2010 and 2MASS frames
-spx/render.py       stretches, Plotly animation and charts, GIF export
+spx/render.py       stretches, charts (spectrum, light curve, motion, miss distance), GIF export
+spx/viewer/         the sky viewer: pixel values packed into PNGs, two-way component (frontend/index.html)
+spx/detect.py       optional helpers: star detection, what changed between two dates
+spx/warp.py         loading screen (canvas star field)
 tests/              pytest on synthetic data
 ```
 
