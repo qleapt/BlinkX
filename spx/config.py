@@ -12,7 +12,11 @@ from pathlib import Path
 # --- Archive -------------------------------------------------------------------
 IRSA = "https://irsa.ipac.caltech.edu"
 TAP_URL = f"{IRSA}/TAP/sync"
-ARTIFACT_TABLE = "spherex.artifact"
+# Fast exposure search: IRSA's SIA v2 image search, one call per release collection, in parallel
+# (~1-3 s instead of 6-15 s for TAP). Add a new release's collection name here. TAP is the fallback.
+SIA_URL = f"{IRSA}/SIA"
+SIA_COLLECTIONS = ["spherex_dr1", "spherex_qr3"]
+ARTIFACT_TABLE ="spherex.artifact"
 PLANE_TABLE = "spherex.plane"
 # SIMBAD name lookup: main site first, then the official mirrors (the main site was down on 2026-11-14)
 SIMBAD_TAPS = [
@@ -59,7 +63,12 @@ SUSPECT_WEIGHT = 1e-6
 WARN_FLAGS = ["OVERFLOW", "NONLINEAR", "PERSIST", "BLOOM", "TRANSIENT", "OUTLIER"]
 
 # --- Limits --------------------------------------------------------------------
-MAX_CONCURRENT = 3          # 8 parallel gave HTTP 503; 4 still gets "busy" often
+# Fast path: the same SPHEREx files on NASA's public AWS bucket, read with HTTP byte ranges
+# (only the rows we need; no throttling). IRSA cutouts remain the fallback.
+S3_BASE = "https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com"
+USE_S3 = True
+S3_CONCURRENT = 24
+MAX_CONCURRENT = 3         # 8 parallel gave HTTP 503; 4 still gets "busy" often
 RETRIES = 12
 REQUEST_TIMEOUT = 60        # seconds
 EPOCH_GAP_DAYS = 45         # a gap longer than this starts a new epoch

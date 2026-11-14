@@ -64,16 +64,22 @@ Embed in another page:
 
 ## How it works
 
-1. **Find the images.** An ADQL query to IRSA's TAP service (`spherex.plane` joined with `spherex.artifact`) lists
-   every SPHEREx exposure whose footprint contains the target. The position is first moved to 2026 with the
+1. **Find the images.** IRSA's SIA image search lists the SPHEREx exposures covering the target in 1–3 s
+   (one call per release, in parallel). Because SIA can return only part of the list in very dense fields, the
+   complete ADQL query to IRSA's TAP service (`spherex.plane` joined with `spherex.artifact`) runs in the
+   background and replaces it as soon as it arrives. The position is first moved to 2026 with the
    proper motion: Barnard's Star has moved 4.5′ since 2000.
 2. **Group into epochs.** A gap of more than 45 days starts a new epoch; dense fields near the ecliptic poles
    (R Draconis) are split into 60-day bins. A quick look loads up to 4 exposures per epoch; "Load all" adds more.
-3. **Fetch cutouts fast.** A cutout is ~4 MB, but 97% is a PSF table we don't need. The app streams the response,
-   reads the FITS headers block by block and hangs up once the image, flags, variance and zodiacal-light layers
-   have arrived (~100 kB). The wavelength table is identical for all exposures of a detector (checked), so it is
-   downloaded once per detector. Requests are limited to 3 at a time and "server busy" answers are retried after
-   the delay the archive asks for. Everything is cached on disk.
+3. **Fetch only the pixels we need.** The same files are mirrored on NASA's public AWS bucket
+   (`nasa-irsa-spherex`). The app reads the FITS headers and then only the rows around the target, with HTTP
+   byte-range requests, up to 24 at a time (the compressed FLAGS layer is decoded row by row). That gives exactly
+   the same pixels as an IRSA cutout (checked) without the archive's "server busy" throttling. If AWS fails, it
+   falls back to IRSA cutouts, streaming each one and hanging up once the image layers have arrived. The
+   wavelength table is identical for all exposures of a detector (checked); the six tables ship with the app in
+   `spx/data`. Gaia stars and the older WISE / 2MASS images download in the background at the same time.
+   Everything is cached on disk. A target never seen before loads in about 7–10 s (≈ 65 s before these changes);
+   the all-band spectrum in about 13 s.
 4. **Align and stack.** Zodiacal light and the local sky are removed, each exposure is reprojected onto one
    north-up grid at 2× the detector resolution (3.1″ pixels), and the exposures of an epoch are averaged with
    inverse-variance weights. Dead pixels are removed; flagged pixels (saturation, cosmic rays…) get a tiny weight,

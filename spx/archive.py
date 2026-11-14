@@ -5,7 +5,9 @@ import csv
 import io
 import json
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 
 import numpy as np
@@ -51,11 +53,39 @@ def parse_rows(text: str) -> list[Exposure]:
         if not uri.endswith(".fits"):
             continue
         band = r["energy_bandpassname"].strip().replace("SPHEREx-", "")
-        m = re.search(r"(l2b-v\d+-\d{4}-\d+)", uri)
+        m = re.search(r"(l2b(?:_[a-z]+)?-v\d+-\d{4}-\d+)", uri)  # also l2b_retry-v27-...
         lo = float(r["time_bounds_lower"])
         hi = float(r.get("time_bounds_upper") or lo)
         out.append(Exposure(band, lo, hi, uri, m.group(1) if m else ""))
     return out
+
+
+def search_sia(ra: float, dec: float) -> list[Exposure]:
+    """Same exposures through IRSA's SIA image search, all release collections in parallel."""
+
+    def one(col):
+        r = requests.get(config.SIA_URL, timeout=60, params={
+            "COLLECTION": col, "POS": f"circle {ra:.6f} {dec:.6f} 0.0001", "RESPONSEFORMAT": "CSV",
+            "MAXREC": 50000})
+        r.raise_for_status()
+        rows = list(csv.DictReader(io.StringIO(r.text)))
+        if len(rows) >= 50000 or "OVERFLOW" in r.text[-500:]:
+            raise RuntimeError("SIA result truncated")
+        return rows
+    with ThreadPoolExecutor(len(config.SIA_COLLECTIONS)) as ex:
+        tables = list(ex.map(one, config.SIA_COLLECTIONS))
+    out = {}
+    for rows in tables:
+        for x in rows:
+            url = x.get("access_url", "")
+            if x.get("dataproduct_subtype", "science") != "science" or not url.endswith(".fits"):
+                continue
+            uri = url.split(config.IRSA + "/", 1)[-1].lstrip("/")
+            m = re.search(r"(l2b(?:_[a-z]+)?-v\d+-\d{4}-\d+)", uri)  # also l2b_retry-v27-...
+            lo = float(x["t_min"])
+            out[uri] = Exposure(x["energy_bandpassname"].replace("SPHEREx-", ""), lo,
+                                float(x.get("t_max") or lo), uri, m.group(1) if m else "")
+    return sorted(out.values(), key=lambda e: e.mjd)
 
 
 def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
@@ -65,6 +95,50 @@ def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
         blob = json.loads(path.read_text())
         if time.time() - blob["t"] < config.TAP_CACHE_HOURS * 3600:
             return [Exposure(**e) for e in blob["rows"]]
+    # Fast path: SIA answers in 1-3 s but can return only part of the list in very dense fields
+    # (R Draconis: 539 of 2,493), so the complete TAP search runs in the background and replaces it.
+    sia_path = config.cache_dir() / f"sia_{ra:.4f}_{dec:+.4f}.json"
+    rows = None
+    if use_cache and sia_path.exists():
+        blob = json.loads(sia_path.read_text())
+        if time.time() - blob["t"] < 3600:
+            rows = [Exposure(**e) for e in blob["rows"]]
+    if rows is None:
+        try:
+            rows = search_sia(ra, dec)
+            sia_path.write_text(json.dumps({"t": time.time(), "rows": [asdict(e) for e in rows]}))
+        except Exception:
+            rows = None
+    if rows:
+        key = (round(ra, 4), round(dec, 4))
+        with _PENDING_LOCK:
+            start = key not in _PENDING
+            _PENDING.add(key)
+        if start:
+            _BG.submit(_quiet_tap, ra, dec)
+        return rows
+    return search_tap(ra, dec)
+
+
+_BG = ThreadPoolExecutor(2)
+_PENDING: set = set()
+_PENDING_LOCK = threading.Lock()
+
+
+def _quiet_tap(ra, dec):
+    try:
+        search_tap(ra, dec)
+    except Exception:
+        pass
+
+
+def is_complete(ra: float, dec: float) -> bool:
+    """True once the full TAP list for this position is cached."""
+    return (config.cache_dir() / f"tap_{ra:.4f}_{dec:+.4f}.json").exists()
+
+
+def search_tap(ra: float, dec: float) -> list[Exposure]:
+    path = config.cache_dir() / f"tap_{ra:.4f}_{dec:+.4f}.json"
     last = None
     for attempt in range(4):
         try:

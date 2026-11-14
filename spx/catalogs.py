@@ -78,12 +78,13 @@ def _sia(ra: float, dec: float, collection: str, band: str) -> list[dict]:
     path = config.cache_dir() / f"sia_{collection}_{band}_{ra:.4f}_{dec:+.4f}.json"
     if path.exists():
         return json.loads(path.read_text())
-    from astroquery.ipac.irsa import Irsa
-    from astropy.coordinates import SkyCoord
-    import astropy.units as u
-    t = Irsa.query_sia(pos=(SkyCoord(ra * u.deg, dec * u.deg), 0.5 * u.arcmin), collection=collection)
-    rows = [dict(url=str(r["access_url"]), mjd=float(r["t_min"]), band=str(r["energy_bandpassname"]))
-            for r in t if str(r["dataproduct_subtype"]) == "science" and str(r["energy_bandpassname"]) == band]
+    # IRSA's SIA v2 service directly as CSV (faster than going through astroquery)
+    r = requests.get(f"{config.IRSA}/SIA", timeout=60, params={
+        "COLLECTION": collection, "POS": f"circle {ra:.6f} {dec:.6f} 0.008", "RESPONSEFORMAT": "CSV"})
+    r.raise_for_status()
+    rows = [dict(url=x["access_url"], mjd=float(x["t_min"]), band=x["energy_bandpassname"])
+            for x in csv.DictReader(io.StringIO(r.text))
+            if x.get("dataproduct_subtype") == "science" and x.get("energy_bandpassname") == band and x.get("t_min")]
     rows.sort(key=lambda r: r["mjd"])
     path.write_text(json.dumps(rows))
     return rows
@@ -115,14 +116,17 @@ def survey_frames(ra: float, dec: float, sphx_band: str, size_arcmin: float) -> 
         rows = [r for r in _sia(ra, dec, "wise_allsky", wb) if r["mjd"] < config.WISE_CRYO_END_MJD]
         if rows:  # first visit only: frames within a few days of the first one
             visit = [r for r in rows if r["mjd"] - rows[0]["mjd"] < 5][:8]
-            imgs = []
-            for r in visit:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def one(r):
                 try:
-                    imgs.append(_cutout(r["url"], ra, dec, size_arcmin))
+                    return r["mjd"], _cutout(r["url"], ra, dec, size_arcmin)
                 except Exception:
-                    continue
-            if imgs:
-                out.append(dict(survey="WISE", band=wb, mjds=[r["mjd"] for r in visit][:len(imgs)], images=imgs))
+                    return None
+            with ThreadPoolExecutor(4) as ex:  # in parallel: these were 2-3 s each, one after another
+                got = [g for g in ex.map(one, visit[:4]) if g]
+            if got:
+                out.append(dict(survey="WISE", band=wb, mjds=[m for m, _ in got], images=[i for _, i in got]))
     tb = config.SURVEY_MATCH.get(sphx_band, {}).get("2mass")
     if tb:
         rows = _sia(ra, dec, "twomass_allsky", tb)

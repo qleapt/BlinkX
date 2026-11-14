@@ -5,6 +5,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+
 from astropy.time import Time
 
 from spx import archive, catalogs, config, cutouts, photometry, render, stack, targets
@@ -91,49 +95,99 @@ def resolve(text):
     return targets.resolve(text)
 
 
-@st.cache_data(ttl=config.TAP_CACHE_HOURS * 3600, show_spinner=False)
-def search(ra, dec):
+def search(ra, dec):  # cached on disk by archive.search (fast list first, complete list soon after)
     return archive.search(ra, dec)
+
+
+# Loading screen: a tiny "blink comparator" (one star hops while the others stay put) and a scan line.
+LOADER = """<style>
+.spx-load{display:flex;align-items:center;gap:18px;padding:16px 18px;margin:6px 0 4px;border-radius:12px;
+  background:#15171c;border:1px solid #2a2d35}
+.spx-field{position:relative;width:120px;height:80px;flex:none;border-radius:8px;background:#05070b;overflow:hidden}
+.spx-field i{position:absolute;width:3px;height:3px;border-radius:50%;background:#cfd6e6;opacity:.85}
+.spx-field b{position:absolute;width:7px;height:7px;border-radius:50%;background:#ffb000;
+  box-shadow:0 0 10px #ffb000;animation:spx-hop 1.2s steps(1) infinite}
+.spx-field s{position:absolute;top:0;bottom:0;width:2px;text-decoration:none;
+  background:linear-gradient(#38d0ff00,#38d0ffcc,#38d0ff00);animation:spx-scan 2.4s linear infinite}
+@keyframes spx-hop{0%{left:44px;top:44px}50%{left:62px;top:30px}}
+@keyframes spx-scan{from{left:-4px}to{left:122px}}
+.spx-txt h4{margin:0 0 4px;padding:0;font-size:1.02rem;color:#e6e6e6}
+.spx-txt p{margin:0;color:#9aa0aa;font-size:.88rem}
+@media (prefers-reduced-motion: reduce){.spx-field b,.spx-field s{animation:none}}
+</style><div class="spx-load" role="status" aria-live="polite"><div class="spx-field">%STARS%<b></b><s></s></div>
+<div class="spx-txt"><h4>%TITLE%</h4><p>%DETAIL%</p></div></div>"""
+STARS = "".join(f'<i style="left:{x}px;top:{y}px"></i>'
+                for x, y in [(12, 14), (30, 60), (52, 10), (80, 52), (98, 22), (106, 68), (20, 38), (68, 72), (90, 8)])
+
+
+class Loader:
+    def __init__(self):
+        self.box, self.bar, self.t0 = st.empty(), st.empty(), time.time()
+
+    def step(self, title, detail=""):
+        self.box.markdown(LOADER.replace("%STARS%", STARS).replace("%TITLE%", title).replace("%DETAIL%", detail),
+                          unsafe_allow_html=True)
+
+    def progress(self, frac, text):
+        self.bar.progress(min(1.0, frac), text)
+
+    def done(self):
+        self.box.empty()
+        self.bar.empty()
+        return time.time() - self.t0
 
 
 st.title("SPHEREx Blink Viewer")
 st.caption("NASA's SPHEREx telescope maps the whole sky every six months in 102 infrared colours. Pick a target "
            "in the sidebar (or type any name or RA Dec) and press ▶ Play: things that move or change brightness "
            "stand out. Try the views in the sidebar for subtraction, spectra and a motion check.")
+load = Loader()
+load.step("Finding your target…", "Looking it up in the SIMBAD catalogue")
 try:
-    with st.spinner("Looking up the target…"):
-        tgt = resolve(ss.target_text)
+    tgt = resolve(ss.target_text)
 except targets.TargetNotFound:
+    load.done()
     st.error(f"Could not find **{ss.target_text}**. Try another name (SIMBAD) or coordinates like `269.452 4.693`.")
     st.stop()
 except Exception as e:  # SIMBAD down
+    load.done()
     st.error(f"Name lookup failed ({e}). Coordinates like `269.452 4.693` always work.")
     st.stop()
 
 ra0, dec0 = targets.position_at(tgt, config.REFERENCE_MJD)
+band = ss.band
+# Side requests that only need the position start now and run while SPHEREx images load.
+_bg = ThreadPoolExecutor(2)
+fut_gaia = (_bg.submit(catalogs.gaia_cone, round(ra0, 4), round(dec0, 4), round(ss.fov / 60 * 0.75, 3))
+            if ss.gaia and ss.mode in ("blink", "add", "sub", "movie") else None)
+fut_survey = (_bg.submit(catalogs.survey_frames, round(ra0, 5), round(dec0, 5), band, ss.fov * 1.45)
+              if ss.survey and ss.mode in ("blink", "sub", "motion") else None)
+_bg.shutdown(wait=False)
+
+load.step("Asking NASA's archive which images cover this spot…", "SPHEREx has photographed it many times since 2025")
 try:
-    with st.spinner("Asking the NASA/IPAC archive which SPHEREx images cover this spot (5–15 s)…"):
-        exps = search(round(ra0, 4), round(dec0, 4))
+    exps = search(round(ra0, 4), round(dec0, 4))
 except archive.ArchiveBusy:
+    load.done()
     st.warning("The NASA/IPAC archive is busy right now. Please try again in a minute.")
     st.stop()
 if not exps:
+    load.done()
     st.info(f"SPHEREx has no images covering {tgt.name} yet. New data arrive weekly.")
     st.stop()
 
-band = ss.band
-
 
 def fetch(todo, label):
-    with st.status(f"Fetching {len(todo)} {label} cutouts…", expanded=False) as status:
-        bar = st.progress(0.0)
-        out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45,
-                                        lambda d, n: bar.progress(d / n, f"{d}/{n} cutouts"))
-        status.update(label=f"{len(out)} {label} cutouts ready" + (f" ({nfail} failed)" if nfail else ""),
-                      state="complete")
+    load.step(f"Downloading {len(todo)} SPHEREx images ({label})…",
+              "Reading only the pixels around your target from NASA's cloud copy of the archive")
+    out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45,
+                                    lambda d, n: load.progress(d / n, f"{d} of {n} images"))
     if not out:
-        st.warning("No cutouts could be downloaded (archive busy?). Please try again in a minute.")
+        load.done()
+        st.warning("No images could be downloaded (archive busy?). Please try again in a minute.")
         st.stop()
+    load.progress(1.0, f"{len(out)} images" + (f" ({nfail} failed)" if nfail else ""))
+    load.step("Lining the images up…", "Putting every exposure on one north-up grid and averaging each epoch")
     return out
 
 
@@ -160,7 +214,9 @@ if ss.mode == "spectrum":
     by_epoch = {}
     for r in sorted(rows, key=lambda r: (r["epoch"], r["wavelength"])):
         by_epoch.setdefault(r["epoch"], []).append(r)
+    load_secs = load.done()
     st.subheader(f"{tgt.name}: SPHEREx spectrum, 0.75–5.0 µm")
+    st.caption(f"{len(stamps)} images loaded in {load_secs:.1f} s")
     close = {}
     try:  # warn when a Gaia neighbour falls inside the 12" aperture (SPHEREx pixels are 6.15")
         nb, _ = catalogs.gaia_cone(round(ra0, 4), round(dec0, 4), 0.02)
@@ -268,15 +324,15 @@ for k, g in groups.items():
 sphx_frames = list(frames)
 
 
-@st.cache_data(ttl=7 * 24 * 3600, show_spinner=False)
-def survey(ra, dec, b, size):
-    return catalogs.survey_frames(ra, dec, b, size)
-
-
-if ss.survey and ss.mode in ("blink", "sub", "motion") and frames:
+survey_pending = False
+if fut_survey is not None and frames:
     try:
-        with st.spinner("Fetching older WISE / 2MASS images…"):
-            items = survey(round(ra0, 5), round(dec0, 5), band, ss.fov * 1.45)
+        if not fut_survey.done():
+            load.step("Adding the older WISE and 2MASS images…", "From 2010 and around 2000, to compare with today")
+        try:  # never hold the SPHEREx movie back for long: the download continues and is cached
+            items = fut_survey.result(timeout=3)
+        except FutureTimeout:
+            items, survey_pending = [], True
         ref = float(np.nanmax([np.nanpercentile(f.image, 99.5) for f in sphx_frames]))
         old = [stack.survey_frame(it, wgrid, shape, ref, band) for it in items]
         frames = sorted([f for f in old if f is not None], key=lambda f: f.mjd_start) + frames
@@ -285,22 +341,20 @@ if ss.survey and ss.mode in ("blink", "sub", "motion") and frames:
 
 
 def target_mark(mjd):
+    if tgt.source == "coordinates":  # nothing to track: just mark the position that was asked for
+        x, y = wgrid.world_to_pixel_values(tgt.ra, tgt.dec)
+        return dict(x=[float(x)], y=[float(y)], name="your position", symbol="cross-thin", color="#ffb000",
+                    size=16, text=[f"RA {tgt.ra:.5f}, Dec {tgt.dec:+.5f} (position you entered)"])
     r, d = targets.position_at(tgt, mjd)
     x, y = wgrid.world_to_pixel_values(r, d)
     return dict(x=[float(x)], y=[float(y)], name="predicted position", symbol="circle-open",
                 color="#ffb000", size=22, text=[f"{tgt.name} predicted on {targets.mjd_to_date(mjd)}"])
 
 
-@st.cache_data(ttl=7 * 24 * 3600, show_spinner=False)
-def gaia(ra, dec, r):
-    return catalogs.gaia_cone(ra, dec, r)
-
-
 gaia_stars, gaia_note = [], ""
-if ss.gaia:
+if fut_gaia is not None:
     try:
-        with st.spinner("Loading Gaia DR3 stars…"):
-            gaia_stars, src = gaia(round(ra0, 4), round(dec0, 4), round(ss.fov / 60 * 0.75, 3))
+        gaia_stars, src = fut_gaia.result(timeout=60)
         gaia_note = f"{len(gaia_stars)} Gaia DR3 stars (G < {config.GAIA_MAX_G:g}, via {src})"
     except Exception:
         gaia_note = "Gaia catalogue unavailable right now."
@@ -325,7 +379,9 @@ def sky_offset(px, py):
 
 
 if ss.mode == "motion":
+    load_secs = load.done()
     st.subheader(f"Motion check: {tgt.name} in {band}")
+    st.caption(f"{len(stamps)} images loaded in {load_secs:.1f} s")
     pts = []
     for f in frames:
         r, d = targets.position_at(tgt, f.mjd_mid)
@@ -386,6 +442,7 @@ if ss.mode == "motion":
                  hide_index=True, use_container_width=True)
     st.stop()
 
+load_secs = load.done()
 tab_view, tab_exp = st.tabs(["Blink", "Exposures"])
 with tab_view:
     mode = ss.mode
@@ -414,6 +471,10 @@ with tab_view:
     marks = [marks_for(f.mjd_mid) for f in shown]
     fig = render.animation(shown, ss.stretch, marks, diverging, arcsec_px, ss.speed, show_flags=ss.showflags)
     st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+    if survey_pending:
+        ci, cb = st.columns([4, 1])
+        ci.info("The older WISE (2010) / 2MASS (~2000) images are still downloading in the background.")
+        cb.button("Add them", help="Reload the view; the older frames are taken from the cache once they arrive.")
 
     c1, c2, c3 = st.columns([2, 2, 3])
     if not load_all and n_band > len(todo):
@@ -425,7 +486,8 @@ with tab_view:
         st.markdown(
             "Each frame is a SPHEREx image of the same patch of sky, taken months apart and averaged per "
             "*epoch* (one sky survey pass). North is up, east is left; the bar is 1 arcminute. "
-            "The orange circle is where the target should be on that date, using its catalogue proper motion. "
+            "The orange circle is where the target should be on that date, using its catalogue proper motion "
+            "(for coordinates you typed, a small orange cross simply marks that position). "
             "A star that moves (like Barnard's Star) shifts against the background; a variable star changes "
             "brightness. **Subtract** shows the change directly: a moving star leaves a dark/light pair. "
             "Motion between epochs is often smaller than one SPHEREx pixel (6.15″), so the image is shown "
@@ -440,6 +502,9 @@ with tab_exp:
     st.caption(f"{len(exps)} SPHEREx exposures cover this position in all bands; {n_band} in {band}.")
 
 last, versions = archive.data_through(exps)
-st.caption(f"{tgt.name}: RA {ra0:.5f}, Dec {dec0:+.5f} on 2026-01-01 ({tgt.source}). "
+where = (f"Position RA {ra0:.5f}, Dec {dec0:+.5f}. " if tgt.source == "coordinates" else
+         f"{tgt.name}: RA {ra0:.5f}, Dec {dec0:+.5f} on 2026-01-01 ({tgt.source}). ")
+st.caption(where +
            f"SPHEREx data through {targets.mjd_to_date(last)} · processing {', '.join(versions)} · "
-           f"{gaia_note} · Data: NASA/IPAC Infrared Science Archive (IRSA), ESA Gaia.")
+           f"{gaia_note} · loaded in {load_secs:.1f} s · "
+           "Data: NASA/IPAC Infrared Science Archive (IRSA, via its AWS copy), ESA Gaia.")

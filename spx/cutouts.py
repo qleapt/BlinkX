@@ -11,11 +11,13 @@ import hashlib
 import io
 import json
 import random
+import re
 import threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import requests
@@ -134,8 +136,11 @@ def cutout_url(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> str:
 
 # --- wavelength table per detector ----------------------------------------------------
 def _wave_path(det: int, version: str):
-    major = version.split("-")[1] if version.count("-") >= 1 else "v"
-    return config.cache_dir() / f"wcswave_D{det}_{major}.fits"
+    m = re.search(r"-(v\d+)-", f"-{version}-")
+    major = m.group(1) if m else "v"
+    name = f"wcswave_D{det}_{major}.fits"
+    shipped = Path(__file__).parent / "data" / name  # tables shipped with the app (8.6 kB each)
+    return shipped if shipped.exists() else config.cache_dir() / name
 
 
 def wave_table(exp: Exposure, url: str) -> fits.BinTableHDU:
@@ -208,6 +213,189 @@ def flag_bits_from_header(h: fits.Header) -> dict:
     return out
 
 
+# --- fast path: byte ranges from the AWS copy of the archive --------------------------
+_S3_SEM = threading.BoundedSemaphore(config.S3_CONCURRENT)
+_S3 = requests.Session()
+_S3.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=config.S3_CONCURRENT + 8))
+_LAYOUTS: dict = {}  # (version, detector, image header bytes) -> layout of the HDUs after IMAGE
+_LAYOUT_LOCK = threading.Lock()
+_POOL = ThreadPoolExecutor(config.S3_CONCURRENT)
+
+
+def s3_url(exp: Exposure) -> str | None:
+    part = exp.uri.split("spherex/", 1)
+    return f"{config.S3_BASE}/{part[1]}" if len(part) == 2 else None
+
+
+def _range(url: str, start: int, stop: int) -> bytes:
+    """Bytes [start, stop) of a file."""
+    last = None
+    for attempt in range(4):
+        try:
+            with _S3_SEM:
+                r = _S3.get(url, headers={"Range": f"bytes={start}-{stop - 1}"}, timeout=30)
+            if r.status_code == 206:
+                return r.content
+            last = f"HTTP {r.status_code}"
+            if r.status_code not in (429, 500, 502, 503, 504):
+                break
+        except requests.RequestException as e:
+            last = type(e).__name__
+        time.sleep(0.4 * (attempt + 1))
+    raise RuntimeError(f"S3 read failed ({last})")
+
+
+def _header_len(buf: bytes, start: int = 0):
+    p = start
+    while p + BLOCK <= len(buf):
+        blk = buf[p:p + BLOCK]
+        if any(blk[i:i + 8] == b"END     " for i in range(0, BLOCK, 80)):
+            return p + BLOCK - start
+        p += BLOCK
+    return None
+
+
+def _data_len(h: fits.Header) -> int:
+    naxis = h.get("NAXIS", 0)
+    if not naxis:
+        return 0
+    n = 1
+    for k in range(1, naxis + 1):
+        n *= h[f"NAXIS{k}"]
+    size = abs(h["BITPIX"]) // 8 * h.get("GCOUNT", 1) * (n + h.get("PCOUNT", 0))
+    return -(-size // BLOCK) * BLOCK
+
+
+def _header_at(url: str, off: int, guess: int = BLOCK * 10):
+    buf = _range(url, off, off + guess)
+    n = _header_len(buf)
+    while n is None:
+        buf += _range(url, off + len(buf), off + len(buf) + guess)
+        n = _header_len(buf)
+    return fits.Header.fromstring(buf[:n].decode("ascii", "replace")), n
+
+
+def _layout_chain(url: str, off: int) -> dict:
+    """Walk FLAGS, VARIANCE, ZODI headers one by one (3 round trips)."""
+    lay = {}
+    for name in ("FLAGS", "VARIANCE", "ZODI"):
+        h, n = _header_at(url, off)
+        if h.get("EXTNAME", "").strip().upper() != name:
+            raise RuntimeError(f"unexpected HDU {h.get('EXTNAME')}")
+        lay[name] = (off, n, h)
+        off += n + _data_len(h)
+    return lay
+
+
+def _rice_rows(url: str, tab_off: int, h: fits.Header, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
+    """Rows y0..y1 of a tile-compressed image stored one row per tile: read the row
+    descriptors, then the matching slice of the heap, then decompress each row."""
+    from astropy.io.fits.hdu.compressed._codecs import Rice1
+    if h.get("ZTILE2", 1) != 1 or h.get("ZTILE1") != h.get("ZNAXIS1"):
+        raise RuntimeError("unsupported tiling")
+    q = "Q" in str(h["TFORM1"]).upper()
+    rowlen = h["NAXIS1"]
+    raw = _range(url, tab_off + y0 * rowlen, tab_off + y1 * rowlen)
+    desc = np.frombuffer(raw, ">i8" if q else ">i4").reshape(y1 - y0, rowlen // (8 if q else 4))[:, :2]
+    heap = tab_off + h.get("THEAP", h["NAXIS1"] * h["NAXIS2"])
+    lo = int(desc[:, 1].min())
+    hi = int((desc[:, 1] + desc[:, 0]).max())
+    blob = _range(url, heap + lo, heap + hi)
+    par = {str(h.get(f"ZNAME{i}", "")).upper(): h.get(f"ZVAL{i}") for i in range(1, 6)}
+    codec = Rice1(blocksize=int(par.get("BLOCKSIZE") or 32), bytepix=int(par.get("BYTEPIX") or 4),
+                  tilesize=int(h["ZTILE1"]))
+    out = np.empty((y1 - y0, x1 - x0), np.int32)
+    for i, (n, o) in enumerate(desc):
+        out[i] = codec.decode(np.frombuffer(blob, np.uint8, int(n), int(o) - lo))[x0:x1]
+    return out
+
+
+def _looks_like_header_end(block: bytes) -> bool:
+    return b"END     " in block and all(32 <= c < 127 for c in block)
+
+
+def fetch_s3_stamp(exp: Exposure, ra: float, dec: float, size_arcmin: float, table=None) -> Stamp:
+    """Read just the rows around (ra, dec) of IMAGE, FLAGS, VARIANCE and ZODI from the full file."""
+    url = s3_url(exp)
+    if not url:
+        raise RuntimeError("no S3 path")
+    # round trip 1: primary + IMAGE header
+    buf = _range(url, 0, BLOCK * 16)
+    n0 = _header_len(buf)
+    while n0 is None:
+        buf += _range(url, len(buf), len(buf) + BLOCK * 16)
+        n0 = _header_len(buf)
+    off = n0 + _data_len(fits.Header.fromstring(buf[:n0].decode("ascii", "replace")))
+    n1 = _header_len(buf, off) if off < len(buf) else None
+    if n1 is None:
+        hi, n1 = _header_at(url, off)
+    else:
+        hi = fits.Header.fromstring(buf[off:off + n1].decode("ascii", "replace"))
+    img_off = off + n1
+    ny, nx = hi["NAXIS2"], hi["NAXIS1"]
+    after_img = img_off + _data_len(hi)
+    # pixel box (same size as an IRSA cutout of size_arcmin)
+    x, y = image_wcs(hi).world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))
+    half = int(np.ceil(size_arcmin * 60 / config.PIXEL_SCALE_ARCSEC / 2))
+    x0, x1 = max(0, int(round(float(x))) - half), min(nx, int(round(float(x))) + half + 1)
+    y0, y1 = max(0, int(round(float(y))) - half), min(ny, int(round(float(y))) + half + 1)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        raise RuntimeError("position off the detector")
+    def rows(data_off, h):
+        if h.get("ZIMAGE"):  # FLAGS: RICE_1 tile-compressed, one tile per row
+            return _rice_rows(url, data_off, h, y0, y1, x0, x1)
+        rb = nx * abs(h["BITPIX"]) // 8
+        raw = _range(url, data_off + y0 * rb, data_off + y1 * rb)
+        dt = np.dtype(">f4") if h["BITPIX"] == -32 else np.dtype(">i4")
+        return np.frombuffer(raw, dt).reshape(y1 - y0, nx)[:, x0:x1].astype(dt.newbyteorder("="))
+
+    futs = {"IMAGE": _POOL.submit(rows, img_off, hi)}  # starts now, in parallel with the rest
+    # Header lengths are fixed per detector and version, but the compressed FLAGS block has a
+    # different size in every file, so its header (which gives that size) is read every time.
+    key = (exp.version, exp.detector)
+    lens = _LAYOUTS.get(key)
+    if lens is None:  # 3 extra round trips, once per detector and processing version
+        lay = _layout_chain(url, after_img)
+        lens = tuple(lay[nm][1] for nm in ("FLAGS", "VARIANCE", "ZODI"))
+        with _LAYOUT_LOCK:
+            _LAYOUTS[key] = lens
+        hf = lay["FLAGS"][2]
+    else:
+        hf, nf = _header_at(url, after_img, guess=lens[0])
+        if nf != lens[0] or hf.get("EXTNAME", "").strip().upper() != "FLAGS":
+            with _LAYOUT_LOCK:
+                _LAYOUTS.pop(key, None)
+            raise RuntimeError("layout changed")
+    f_off = after_img + lens[0]
+    v_off = f_off + _data_len(hf) + lens[1]
+    z_off = v_off + _data_len(hi) + lens[2]  # VARIANCE has the same shape and type as IMAGE
+    plain = {"BITPIX": -32}
+    futs["FLAGS"] = _POOL.submit(rows, f_off, hf)
+    futs["VARIANCE"] = _POOL.submit(rows, v_off, plain)
+    futs["ZODI"] = _POOL.submit(rows, z_off, plain)
+    checks = [_POOL.submit(_range, url, o - BLOCK, o) for o in (v_off, z_off)]  # header ends where expected?
+    if not all(_looks_like_header_end(c.result()) for c in checks):
+        with _LAYOUT_LOCK:
+            _LAYOUTS.pop(key, None)
+        raise RuntimeError("layout changed")
+    arr = {k: f.result() for k, f in futs.items()}
+    h = hi.copy()
+    h["NAXIS1"], h["NAXIS2"] = x1 - x0, y1 - y0
+    for k, d in (("CRPIX1", x0), ("CRPIX2", y0), ("CRPIX1W", x0), ("CRPIX2W", y0)):
+        if k in h:
+            h[k] = h[k] - d
+    st = Stamp(exp.band, exp.mjd, exp.mjd_end, exp.uri, exp.version, arr["IMAGE"].astype(np.float32),
+               arr["FLAGS"].astype(np.int32), arr["VARIANCE"].astype(np.float32), arr["ZODI"].astype(np.float32),
+               h.tostring(), flag_bits_from_header(hf))
+    if table is not None:
+        cx, cy = image_wcs(h).world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))
+        try:
+            st.wavelength, st.bandwidth = wavelength_at(h, table, float(cx), float(cy))
+        except Exception:
+            pass
+    return st
+
+
 def parse_stamp(raw: bytes, exp: Exposure, ra: float, dec: float, table=None) -> Stamp:
     hd = fits.open(io.BytesIO(raw))
     h = hd["IMAGE"].header
@@ -254,7 +442,15 @@ def get_stamp(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> Stamp
         except Exception:
             path.unlink(missing_ok=True)
     url = cutout_url(exp, ra, dec, size_arcmin)
-    if has_wave_table(exp):
+    st = None
+    if has_wave_table(exp) and config.USE_S3:
+        try:
+            st = fetch_s3_stamp(exp, ra, dec, size_arcmin, wave_table(exp, url))
+        except Exception:
+            st = None  # fall back to the IRSA cutout service
+    if st is not None:
+        pass
+    elif has_wave_table(exp):
         st = parse_stamp(fetch_prefix(url), exp, ra, dec, wave_table(exp, url))
     else:  # first exposure of this detector: one full download, keep its wavelength table
         raw = fetch_full(url)
@@ -291,7 +487,8 @@ def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, 
         if progress:
             progress(done, len(exps) + done)
     total = len(exps) + done
-    with ThreadPoolExecutor(config.MAX_CONCURRENT) as ex:
+    workers = max(config.MAX_CONCURRENT, config.S3_CONCURRENT // 2) if config.USE_S3 else config.MAX_CONCURRENT
+    with ThreadPoolExecutor(workers) as ex:
         futs = {ex.submit(get_stamp, e, ra, dec, size_arcmin): e for e in exps}
         for f in as_completed(futs):
             done += 1
