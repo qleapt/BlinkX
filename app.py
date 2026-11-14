@@ -315,7 +315,7 @@ def resolve_find():
     f = ss.get("find")
     if not f or f.get("field") != tgt.name:
         return None, ""
-    m = f["mark"]
+    m = f["marks"][0] if f.get("marks") else f["mark"]
     try:
         star, sep = catalogs.nearest(_gaia_near(round(m["ra"], 5), round(m["dec"], 5)),
                                      m["ra"], m["dec"], m["mjd"], config.FIND_MATCH_ARCSEC)
@@ -604,28 +604,47 @@ def pending_notes():
     watch()
 
 
-def _go_find(mark, mode="motion"):
+def _go_pair(m1, m2):
+    ss["find"] = dict(marks=[m1, m2], field=tgt.name)
+    ss["mode"] = "motion"
+
+
+def _go_spectrum(mark):
     ss["find"] = dict(mark=mark, field=tgt.name)
-    ss["mode"] = mode
+    ss["mode"] = "spectrum"
 
 
 def check_my_find(marks, key):
-    """'Check my find', only on request: the user's mark -> nearest Gaia star -> motion check."""
+    """'Check my find', only on request: compare two of the user's marks, each on its own photo."""
     if not marks:
         return
+    fmt = lambda i: f"#{i + 1} · {marks[i].get('date', '')} · RA {marks[i]['ra']:.5f}°, Dec {marks[i]['dec']:+.5f}°"  # noqa
     with st.container(border=True):
-        c1, c2, c3 = st.columns([3, 1, 1], vertical_alignment="bottom")
-        i = c1.selectbox("🔎 Check my find: which mark?", range(len(marks)), key=f"find_sel|{key}",
-                         format_func=lambda i: f"#{i + 1} · {marks[i].get('date', '')} · RA {marks[i]['ra']:.5f}°, "
-                                               f"Dec {marks[i]['dec']:+.5f}°",
-                         help="Pick one of your marks. The app then looks for a catalogued star (Gaia) at that spot "
-                              "and checks whether SPHEREx sees it move as the catalogue predicts.")
-        mark = marks[min(i, len(marks) - 1)]
-        c2.button("Check my find", type="primary", on_click=_go_find, args=(mark,), key=f"find_go|{key}",
-                  use_container_width=True, help="Opens the Motion check for your marked object.")
-        c3.button("🌈 Its spectrum", on_click=_go_find, args=(mark, "spectrum"), key=f"find_sp|{key}",
+        st.markdown("**Check my find**")
+        if len(marks) < 2:
+            st.caption("Mark the same object on two different photos (two dates) to measure how it moved between "
+                       "them. Only those two photos are compared.")
+            st.button("Spectrum of mark #1", on_click=_go_spectrum, args=(marks[0],), key=f"find_sp|{key}",
+                      help="Measures the marked object's brightness at every infrared colour SPHEREx sees.")
+            return
+        c1, c2 = st.columns(2)
+        i = c1.selectbox("First mark (earlier photo)", range(len(marks)), index=len(marks) - 2, format_func=fmt,
+                         key=f"find_a|{key}", help="The mark on the first photo.")
+        j = c2.selectbox("Second mark (later photo)", range(len(marks)), index=len(marks) - 1, format_func=fmt,
+                         key=f"find_b|{key}", help="The same object, marked on the second photo.")
+        i, j = min(i, len(marks) - 1), min(j, len(marks) - 1)
+        b1, b2 = st.columns(2)
+        same = abs(marks[i]["mjd"] - marks[j]["mjd"]) < 0.01
+        b1.button("Compare these two marks", type="primary", on_click=_go_pair, args=(marks[i], marks[j]),
+                  key=f"find_go|{key}", use_container_width=True, disabled=i == j or same,
+                  help="Measures how far and how fast the object moved between the two photos you marked it on. "
+                       "Only those two photos are used, so fast movers (asteroids, meteors) are not mixed up "
+                       "with other photos. If the object is a Gaia star, its predicted move is shown too.")
+        b2.button("Spectrum of the first mark", on_click=_go_spectrum, args=(marks[i],), key=f"find_sp|{key}",
                   use_container_width=True,
-                  help="Measures your marked object's brightness at every infrared colour SPHEREx sees.")
+                  help="Measures the marked object's brightness at every infrared colour SPHEREx sees.")
+        if same:
+            st.caption("These two marks are on the same photo: pick marks made on two different photos.")
 
 
 def motion_check(t, note=""):
@@ -743,13 +762,93 @@ def motion_check(t, note=""):
         sky_viewer(frames, key_extra=f"motion|{t.name}", follow=t)
 
 
+def photo_of(mjd):
+    """The photo a mark was made on (epoch stack, older survey, or a single exposure), by its date."""
+    for f in frames:
+        if abs(f.mjd_mid - mjd) < 0.01:
+            return f
+    for i, a in enumerate(by_uri.values()):
+        if abs(0.5 * (a.stamp.mjd + a.stamp.mjd_end) - mjd) < 0.01:
+            return stack.single_frame(a, i + 1)
+    return None
+
+
+def where_on(f, m):
+    """Centre of the marked object on its own photo (light-weighted), and its uncertainty in arcsec."""
+    cx, cy = photometry.centroid(f.image, float(m["x"]), float(m["y"]), r=3)
+    if not np.isfinite(cx) or np.hypot(cx - m["x"], cy - m["y"]) > 3:
+        cx, cy = float(m["x"]), float(m["y"])
+    err = 0.6 if f.kind == "survey" else 1.2
+    if f.kind == "stack" and len(f.stamps) >= 3:  # scatter of the single exposures of that photo
+        cs = [photometry.centroid(by_uri[s.uri].image, cx, cy, r=3) for s in f.stamps if s.uri in by_uri]
+        cs = np.array([c for c in cs if np.isfinite(c[0])])
+        if len(cs) >= 3:
+            err = max(0.3, float(np.hypot(*cs.std(axis=0)) / np.sqrt(len(cs)) * arcsec_px))
+    r, d = wgrid.pixel_to_world_values(cx, cy)
+    return float(r), float(d), err, (cx, cy)
+
+
+def pair_check(m1, m2):
+    """Motion of one object between the two photos the user marked it on. No other photo is used, so a fast
+    mover (asteroid, meteor) is never confused with what other photos show."""
+    if m2["mjd"] < m1["mjd"]:
+        m1, m2 = m2, m1
+    fa, fb = photo_of(m1["mjd"]), photo_of(m2["mjd"])
+    st.subheader(f"Motion between your two marks ({band})")
+    if fa is None or fb is None:
+        st.warning("One of the photos you marked is not in this view any more (another band or field?). "
+                   "Go back, and mark the object again on two photos.")
+        return
+    ra1, de1, e1, p1 = where_on(fa, m1)
+    ra2, de2, e2, p2 = where_on(fb, m2)
+    de_ = ((ra2 - ra1 + 180) % 360 - 180) * np.cos(np.radians((de1 + de2) / 2)) * 3600
+    dn_ = (de2 - de1) * 3600
+    dist, err = float(np.hypot(de_, dn_)), float(np.hypot(e1, e2))
+    days = fb.mjd_mid - fa.mjd_mid
+    pa = float(np.degrees(np.arctan2(de_, dn_)) % 360)
+    way = detect.COMPASS[int(round(pa / 45)) % 8]
+    st.caption(f"Photo 1: {fa.label}  \nPhoto 2: {fb.label}  \nOnly these two photos are used. "
+               f"Time between them: {days:.2f} days ({days / 365.25:.3f} years).")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Moved", f"{dist:.1f} ± {err:.1f}″", help="Distance on the sky between the object's centre on photo 1 "
+              "and on photo 2. ± is the measuring uncertainty (1σ) of the two centres together.")
+    c2.metric("Direction", f"{way} ({pa:.0f}°)", help="Direction of the move, in degrees from north towards east.")
+    speed = (f"{dist / (days / 365.25):.2f}″ per year" if days > 30 else
+             f"{dist / days:.2f}″ per day" if days > 1 else f"{dist / (days * 24):.2f}″ per hour")
+    c3.metric("Speed", speed if days > 0 else "–", help="Distance divided by the time between the two photos.")
+    if dist > 3 * err:
+        st.markdown(f"**It moved**: {dist:.1f}″ toward the {way}, more than 3× the uncertainty ({3 * err:.1f}″).")
+    else:
+        st.markdown(f"**No clear motion** between these two photos: the shift ({dist:.1f}″) is within 3× the "
+                    f"uncertainty ({3 * err:.1f}″). One SPHEREx pixel is 6.15″.")
+    t, note = resolve_find()
+    pred = None
+    if t is not None and (t.pmra or t.pmdec or t.parallax):
+        o = targets.predicted_offsets(t, [fa.mjd_mid, fb.mjd_mid], config.REFERENCE_MJD)
+        pred = (float(o[1][0] - o[0][0]), float(o[1][1] - o[0][1]))
+        miss = float(np.hypot(de_ - pred[0], dn_ - pred[1]))
+        st.markdown(("**Agrees** with Gaia" if miss < 3 * err else "**Differs** from Gaia") +
+                    f": Gaia predicts a move of {np.hypot(*pred):.1f}″ between these two dates; the measured move is "
+                    f"{miss:.1f}″ away from that (uncertainty {err:.1f}″).")
+    st.caption(note)
+    st.plotly_chart(render.pair_fig(de_, dn_, e1, e2, pred), use_container_width=True)
+    st.dataframe(pd.DataFrame([
+        {"Mark": "photo 1", "Photo": fa.label, "RA (°)": round(ra1, 6), "Dec (°)": round(de1, 6), "± (″)": round(e1, 2)},
+        {"Mark": "photo 2", "Photo": fb.label, "RA (°)": round(ra2, 6), "Dec (°)": round(de2, 6), "± (″)": round(e2, 2)}]),
+        hide_index=True, use_container_width=True)
+    st.caption("The centres are measured again on each photo (light-weighted centre near your mark), so a mark a "
+               "little off the object does not matter.")
+    with st.expander("The two photos (blink them with Play)"):
+        sky_viewer([fa, fb], key_extra="pair", follow=t)
+
+
 if ss.mode == "motion":
     load_secs = load.done()
-    mt, note = resolve_find()
-    if mt:
-        st.button(f"← Back to {tgt.name}" if tgt.source != "coordinates" else "← Back", on_click=_drop_find,
-                  help="Forget this find and show the usual motion check.")
-        motion_check(mt, f"{len(stamps)} photos loaded in {load_secs:.1f} s. " + note)
+    f_ = ss.get("find") or {}
+    if f_.get("field") == tgt.name and f_.get("marks"):
+        st.button(f"Back to {tgt.name}" if tgt.source != "coordinates" else "Back", on_click=_drop_find,
+                  help="Forget these marks and show the usual motion check.")
+        pair_check(*f_["marks"][:2])
         st.stop()
     if tgt.source == "coordinates":
         st.subheader(f"Motion check at {tgt.name} ({band})")
@@ -900,6 +999,8 @@ with tab_view:
                 st.info("Pick two different photos to compare.")
             else:
                 st.info(f"No change above {ss.h_sigma:g}σ between {labels[pair[0]]} and {labels[pair[1]]}.")
+        st.caption("*Note: the helpers are experimental. They can miss things or report false alarms, so always check "
+                   "their results by eye.*")
 
     c1, c2, c3 = st.columns([2, 2, 3])
     if not load_all and n_band > len(todo):

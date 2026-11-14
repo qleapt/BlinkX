@@ -135,6 +135,27 @@ def miss_fig(pts):
     return _chart_layout(fig, "Photo", "Miss: measured − predicted (″)", height=300)
 
 
+def pair_fig(de, dn, e1, e2, pred=None):
+    """One object on two photos: photo 1 at (0, 0), photo 2 at its measured offset; Gaia's prediction if any."""
+    fig = go.Figure()
+    if pred is not None:
+        fig.add_trace(go.Scatter(x=[0, pred[0]], y=[0, pred[1]], mode="lines+markers", name="Gaia prediction",
+                                 line=dict(color=INK2, dash="dot", width=2),
+                                 marker=dict(size=[0, 11], symbol="circle-open", color=INK2)))
+    for name, x, y, e, k in (("photo 1", 0.0, 0.0, e1, 1), ("photo 2", de, dn, e2, 3)):
+        fig.add_trace(go.Scatter(
+            x=[x], y=[y], mode="markers", name=name, marker=dict(size=12, color=epoch_color(k)),
+            error_x=dict(type="data", array=[e], color=epoch_color(k), thickness=1.2, width=0),
+            error_y=dict(type="data", array=[e], color=epoch_color(k), thickness=1.2, width=0),
+            hovertemplate=f"{name}<br>east %{{x:.1f}}″, north %{{y:.1f}}″ ± {e:.1f}″<extra></extra>"))
+    fig.add_annotation(x=de, y=dn, ax=0, ay=0, xref="x", yref="y", axref="x", ayref="y", showarrow=True,
+                       arrowhead=2, arrowcolor=INK, text="")
+    _chart_layout(fig, "East offset (″, east is left)", "North offset (″)", height=420)
+    fig.update_xaxes(autorange="reversed")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    return fig
+
+
 def _rgb(z: np.ndarray, diverging: bool) -> np.ndarray:
     z = np.nan_to_num(z, nan=0.0)
     if diverging:

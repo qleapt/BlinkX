@@ -87,7 +87,7 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
   <div class="side">
     <div class="tip" id="tip"></div>
     <h4>Marked objects</h4><div id="marks"></div>
-    <h4>Same spot on every date</h4><div id="card" class="small"></div>
+    <h4>Your marks, each on its own photo</h4><div id="card" class="small"></div>
     <h4>Distances between marks</h4><div id="pairs"></div>
     <h4>Measured lines</h4><div id="lines"></div>
     <h4>Real size (optional)</h4>
@@ -339,12 +339,13 @@ function aper(i, p) {   // light within 2.5 px minus the median sky of a 5-8 px 
     if (d <= 2.5) { s += v; n++; } else if (d >= 5 && d <= 8) ring.push(v); }
   if (!n || ring.length < 5) return NaN; ring.sort((a, b) => a - b); return s - n * ring[ring.length >> 1];
 }
-function thumbs() {   // comparison card: the same spot on every date, side by side, with a fixed crosshair
+function thumbs() {   // comparison card: each mark on its own photo only, side by side, with a fixed crosshair
   const el = $("card");
-  if (!marks.length) { el.innerHTML = '<div class="empty">Mark an object to see its spot on every date.</div>'; return; }
+  if (!marks.length) { el.innerHTML = '<div class="empty">Mark an object to see it here, on the photo you marked it on.</div>'; return; }
   if (!sample) { el.textContent = "Loading…"; return; }
-  const m = marks[marks.length - 1], r = 8, [lo, hi] = limits(), kind = $("stretch").value, wrap = document.createElement("div"); wrap.className = "cards";
-  D.frames.forEach((f, i) => { if (!ready[i]) return; const c = document.createElement("canvas"); c.width = c.height = 2 * r + 1;
+  const r = 8, [lo, hi] = limits(), kind = $("stretch").value, wrap = document.createElement("div"); wrap.className = "cards";
+  marks.forEach((m, k) => { const i = D.frames.findIndex(f => Math.abs(f.mjd - m.mjd) < 0.01); if (i < 0 || !ready[i]) return;
+    const f = D.frames[i], c = document.createElement("canvas"); c.width = c.height = 2 * r + 1;
     const g = c.getContext("2d"), im = g.createImageData(c.width, c.height), x0 = Math.round(m.x), y0 = Math.round(m.y);
     for (let j = 0; j < c.height; j++) for (let x = 0; x < c.width; x++) { const col = colour(valAt(i, x0 - r + x, y0 + r - j), D.diverging, lo, hi, kind), p = (j * c.width + x) * 4;
       im.data[p] = col[0]; im.data[p + 1] = col[1]; im.data[p + 2] = col[2]; im.data[p + 3] = 255; }
@@ -354,10 +355,10 @@ function thumbs() {   // comparison card: the same spot on every date, side by s
     og.strokeStyle = "rgba(255,176,0,.95)"; og.lineWidth = 1; og.beginPath(); og.moveTo(cxp, cyp - 12); og.lineTo(cxp, cyp - 5); og.moveTo(cxp, cyp + 5); og.lineTo(cxp, cyp + 12);
     og.moveTo(cxp - 12, cyp); og.lineTo(cxp - 5, cyp); og.moveTo(cxp + 5, cyp); og.lineTo(cxp + 12, cyp); og.stroke();
     const fig = document.createElement("figure"), cap = document.createElement("figcaption"), b = aper(i, m);
-    fig.appendChild(c); fig.appendChild(ov); cap.textContent = f.date.slice(0, 7) + (isFinite(b) ? " · " + num(b, 2) : " · –"); fig.appendChild(cap);
+    fig.appendChild(c); fig.appendChild(ov); cap.textContent = "#" + (k + 1) + " " + f.date + (isFinite(b) ? " · " + num(b, 2) : " · –"); fig.appendChild(cap);
     fig.title = f.label + "\nBrightness at the mark (light within 2.5 px minus the local sky, sum of MJy/sr): " + (isFinite(b) ? num(b, 3) : "no data");
     fig.onclick = () => { stop(); setFrame(i); }; wrap.appendChild(fig); });
-  el.innerHTML = '<div class="small">Mark #' + marks.length + ' on every photo. The crosshair stays on your mark; the number is the brightness there with the sky removed. Click one to show it.</div>';
+  el.innerHTML = '<div class="small">Each mark on the photo you marked it on, nothing else. The crosshair is your mark; the number is the brightness there with the sky removed. Click one to show that photo.</div>';
   el.appendChild(wrap);
 }
 function panel() {
