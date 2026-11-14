@@ -278,7 +278,42 @@ def fetch(todo, label, group_of=None):
     return out
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _gaia_near(ra, dec):
+    return catalogs.gaia_cone(ra, dec, config.FIND_CONE_DEG)[0]
+
+
+def _drop_find():
+    ss.pop("find", None)
+
+
+def resolve_find():
+    """The object of 'Check my find' in this field: (Target, plain-English note), or (None, "")."""
+    f = ss.get("find")
+    if not f or f.get("field") != tgt.name:
+        return None, ""
+    m = f["mark"]
+    try:
+        star, sep = catalogs.nearest(_gaia_near(round(m["ra"], 5), round(m["dec"], 5)),
+                                     m["ra"], m["dec"], m["mjd"], config.FIND_MATCH_ARCSEC)
+        trouble = ""
+    except Exception:
+        star, sep = None, None
+        trouble = "The Gaia catalogue could not be reached right now. "
+    if star:
+        return catalogs.as_target(star, name=f"Your find (Gaia DR3 {star['id']})"), (
+            f"Your mark ({m.get('date', '')}) at RA {m['ra']:.5f}°, Dec {m['dec']:+.5f}° matches Gaia DR3 "
+            f"{star['id']} (G = {star['g']:.1f}), {sep:.1f}″ away on that date.")
+    from spx.targets import Target
+    return Target("Your find", m["ra"], m["dec"], m["mjd"], source="your mark (no catalogue match)"), (
+        trouble + f"No Gaia star within {config.FIND_MATCH_ARCSEC:g}″ of your mark (RA {m['ra']:.5f}°, "
+        f"Dec {m['dec']:+.5f}°), so there is no prediction: it is treated as standing still at the spot you "
+        "marked, and what SPHEREx measures is its own. Very cold or very faint objects are often missing from Gaia.")
+
+
 if ss.mode == "spectrum":
+    spec_t, find_note = resolve_find()
+    spec_t = spec_t or tgt
     spec_key = f"specall|{tgt.name}"
     spec_all = ss.get(spec_key, False)
     todo, epoch_of = [], {}
@@ -293,7 +328,7 @@ if ss.mode == "spectrum":
     stamps = fetch(todo, "all-band")
     rows = []
     for s in stamps:
-        m = photometry.measure(s, *targets.position_at(tgt, s.mjd))
+        m = photometry.measure(s, *targets.position_at(spec_t, s.mjd))
         k = epoch_of[s.uri]
         m.update(date=targets.mjd_to_date(s.mjd), datetime=Time(s.mjd, format="mjd").iso,
                  epoch=1 + (k - 1) * len(render.EPOCH_COLORS) // nep if fold else k)
@@ -302,19 +337,21 @@ if ss.mode == "spectrum":
     for r in sorted(rows, key=lambda r: (r["epoch"], r["wavelength"])):
         by_epoch.setdefault(r["epoch"], []).append(r)
     load_secs = load.done()
-    st.subheader(f"{tgt.name}: SPHEREx spectrum, 0.75–5.0 µm")
-    st.caption(f"{len(stamps)} images loaded in {load_secs:.1f} s")
+    st.subheader(f"{spec_t.name}: SPHEREx spectrum, 0.75–5.0 µm")
+    st.caption(f"{len(stamps)} images loaded in {load_secs:.1f} s. " + find_note)
+    if find_note:
+        st.button(f"← Back to {tgt.name}", on_click=_drop_find, help="Forget this find and measure the target again.")
     close = {}
     try:  # warn when a Gaia neighbour falls inside the 12" aperture (SPHEREx pixels are 6.15")
-        nb, _ = catalogs.gaia_cone(round(ra0, 4), round(dec0, 4), 0.02)
+        nb, _ = catalogs.gaia_cone(*(round(v, 4) for v in targets.position_at(spec_t, config.REFERENCE_MJD)), 0.02)
         mids = [min(r["mjd"] for r in rows), max(r["mjd"] for r in rows)]
-        pr0, pd0 = targets.position_at(tgt, mids[0])
+        pr0, pd0 = targets.position_at(spec_t, mids[0])
         gr0, gd0 = catalogs.gaia_at(nb, mids[0])
         sep0 = np.hypot((gr0 - pr0) * np.cos(np.radians(pd0)), gd0 - pd0) * 3600
         own = [s["g"] for s, d in zip(nb, sep0) if d < 2.0]
         g_limit = (min(own) + 3) if own else 99  # only neighbours within 3 mag of the target matter
         for m in mids:
-            pr, pd_ = targets.position_at(tgt, m)
+            pr, pd_ = targets.position_at(spec_t, m)
             gr, gd = catalogs.gaia_at(nb, m)
             sep = np.hypot((gr - pr) * np.cos(np.radians(pd_)), gd - pd_) * 3600
             for s, d in zip(nb, sep):
@@ -327,8 +364,14 @@ if ss.mode == "spectrum":
                        "wavelengths where a faint, cold target is dark.")
     except Exception:
         pass
-    logy = st.toggle("Logarithmic flux axis", value=False)
-    st.plotly_chart(render.spectrum_fig(by_epoch, logy), use_container_width=True)
+    s1, s2 = st.columns([3, 1], vertical_alignment="bottom")
+    ep_label = {k: f"Epoch {k}: {v[0]['date']}" for k, v in by_epoch.items() if v}
+    show_eps = s1.multiselect("Dates to show", list(ep_label), default=list(ep_label), format_func=ep_label.get,
+                              help="Pick two dates to compare their spectra directly; remove one to hide it.")
+    logy = s2.toggle("Logarithmic flux axis", value=False,
+                     help="Spreads out faint and bright values; useful when the spectrum spans a big range.")
+    st.plotly_chart(render.spectrum_fig({k: v for k, v in by_epoch.items() if k in show_eps}, logy),
+                    use_container_width=True)
     st.caption("Each point is one exposure; SPHEREx sees each spot at a slightly different wavelength every "
                "time, so many exposures together make a spectrum. Colours are survey epochs"
                + (" (time bins merged)" if fold else "") + ". Hollow points have flagged pixels in the aperture "
@@ -449,8 +492,11 @@ if fut_survey is not None and frames:
         st.caption(f"Older survey images unavailable ({type(e).__name__}).")
 
 
-def target_at(mjd):
-    """Where the target is on that date, in grid pixels (a ring), or the typed position (a cross)."""
+def target_at(mjd, t=None):
+    """Where the target (or t) is on that date, in grid pixels (a ring), or the typed position (a cross)."""
+    if t is not None:
+        x, y = wgrid.world_to_pixel_values(*targets.position_at(t, mjd))
+        return dict(x=float(x), y=float(y), label=f"{t.name}: predicted position on {targets.mjd_to_date(mjd)}")
     if tgt.source == "coordinates":  # nothing to track: just mark the position that was asked for
         x, y = wgrid.world_to_pixel_values(tgt.ra, tgt.dec)
         return dict(x=float(x), y=float(y), cross=True,
@@ -487,11 +533,11 @@ COORD_NOTE = ("📍 You typed a sky position, so nothing is followed here (the o
               "Look for anything that moves or changes yourself, then **📍 Mark** it on two dates to measure it.")
 
 
-def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None):
+def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None, follow=None):
     """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts).
     stars / changes: results of the optional helpers (None while they are switched off)."""
     cx, cy = (float(v) - 1 for v in wgrid.wcs.crpix)
-    data = viewer.payload(shown_frames, target=[target_at(f.mjd_mid) for f in shown_frames],
+    data = viewer.payload(shown_frames, target=[target_at(f.mjd_mid, follow) for f in shown_frames],
                           gaia=[gaia_on(f.mjd_mid) for f in shown_frames], scale=arcsec_px, center=(cx, cy),
                           radec=(ra0, dec0), diverging=diverging, mode=ss.mode,
                           title=f"{tgt.name}|{band}|{ss.fov}|{key_extra}", stars=stars, changes=changes)
@@ -535,13 +581,9 @@ def pending_notes():
     watch()
 
 
-def _go_find(mark):
+def _go_find(mark, mode="motion"):
     ss["find"] = dict(mark=mark, field=tgt.name)
-    ss["mode"] = "motion"
-
-
-def _drop_find():
-    ss.pop("find", None)
+    ss["mode"] = mode
 
 
 def check_my_find(marks, key):
@@ -549,15 +591,18 @@ def check_my_find(marks, key):
     if not marks:
         return
     with st.container(border=True):
-        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        c1, c2, c3 = st.columns([3, 1, 1], vertical_alignment="bottom")
         i = c1.selectbox("🔎 Check my find: which mark?", range(len(marks)), key=f"find_sel|{key}",
                          format_func=lambda i: f"#{i + 1} · {marks[i].get('date', '')} · RA {marks[i]['ra']:.5f}°, "
                                                f"Dec {marks[i]['dec']:+.5f}°",
                          help="Pick one of your marks. The app then looks for a catalogued star (Gaia) at that spot "
                               "and checks whether SPHEREx sees it move as the catalogue predicts.")
-        c2.button("Check my find", type="primary", on_click=_go_find, args=(marks[min(i, len(marks) - 1)],),
-                  key=f"find_go|{key}", use_container_width=True,
-                  help="Opens the Motion check for your marked object.")
+        mark = marks[min(i, len(marks) - 1)]
+        c2.button("Check my find", type="primary", on_click=_go_find, args=(mark,), key=f"find_go|{key}",
+                  use_container_width=True, help="Opens the Motion check for your marked object.")
+        c3.button("🌈 Its spectrum", on_click=_go_find, args=(mark, "spectrum"), key=f"find_sp|{key}",
+                  use_container_width=True,
+                  help="Measures your marked object's brightness at every infrared colour SPHEREx sees.")
 
 
 def motion_check(t, note=""):
@@ -603,6 +648,7 @@ def motion_check(t, note=""):
     tr = targets.predicted_offsets(t, grid_mjd, config.REFERENCE_MJD)
     st.plotly_chart(render.motion_fig(tr[:, 0], tr[:, 1], pts), use_container_width=True)
     pending_notes()
+    st.plotly_chart(render.miss_fig(pts), use_container_width=True)
     yrs = [(p["mjd"] - config.REFERENCE_MJD) / 365.25 for p in pts]
     fit = photometry.fit_motion(yrs, [p["de"] - p["par_e"] for p in pts], [p["dn"] - p["par_n"] for p in pts],
                                 [p["err"] for p in pts])
@@ -670,33 +716,16 @@ def motion_check(t, note=""):
                    "Miss = distance between the measured and predicted points.")
         st.download_button("Download this table (CSV)", df.to_csv(index=False),
                            f"motion_{t.name.replace(' ', '_')}_{band}.csv", help="Save the step-by-step numbers.")
+    with st.expander("▶ Watch it move: the photos with the predicted position (orange ring) on each date"):
+        sky_viewer(frames, key_extra=f"motion|{t.name}", follow=t)
 
 
 if ss.mode == "motion":
     load_secs = load.done()
-    find = ss.get("find") if (ss.get("find") or {}).get("field") == tgt.name else None
-    if find:
-        m = find["mark"]
-        try:
-            near, _src = catalogs.gaia_cone(round(m["ra"], 5), round(m["dec"], 5), config.FIND_CONE_DEG)
-            star, sep = catalogs.nearest(near, m["ra"], m["dec"], m["mjd"], config.FIND_MATCH_ARCSEC)
-        except Exception:
-            star, sep = None, None
-            st.warning("The Gaia catalogue could not be reached right now, so there is no prediction. "
-                       "The measured motion is still shown.")
+    mt, note = resolve_find()
+    if mt:
         st.button(f"← Back to {tgt.name}" if tgt.source != "coordinates" else "← Back", on_click=_drop_find,
                   help="Forget this find and show the usual motion check.")
-        if star:
-            mt = catalogs.as_target(star, name=f"Your find (Gaia DR3 {star['id']})")
-            note = (f"Your mark ({m.get('date', '')}) at RA {m['ra']:.5f}°, Dec {m['dec']:+.5f}° matches Gaia DR3 "
-                    f"{star['id']} (G = {star['g']:.1f}), {sep:.1f}″ away on that date. The grey line is Gaia's "
-                    "prediction for it.")
-        else:
-            from spx.targets import Target
-            mt = Target("Your find", m["ra"], m["dec"], m["mjd"], source="your mark (no catalogue match)")
-            note = (f"No Gaia star within {config.FIND_MATCH_ARCSEC:g}″ of your mark (RA {m['ra']:.5f}°, Dec {m['dec']:+.5f}°), so there is no "
-                    "prediction: the grey 'line' is just the spot you marked. The measured motion below is "
-                    "SPHEREx's alone. Very cold or very faint objects are often missing from Gaia.")
         motion_check(mt, f"{len(stamps)} photos loaded in {load_secs:.1f} s. " + note)
         st.stop()
     if tgt.source == "coordinates":
@@ -726,7 +755,21 @@ with tab_view:
         if mode == "sub":
             st.info("Subtract needs photos from at least two dates (epochs) in this band.")
     elif mode == "add":
-        shown = [stack.add(sphx_frames)]
+        ep_names = [f.label.split(" · ")[0] for f in sphx_frames]
+        pick = st.multiselect("Dates to add together", range(len(sphx_frames)), default=list(range(len(sphx_frames))),
+                              format_func=lambda i: ep_names[i],
+                              help="Adding more dates lowers the noise, so fainter things show up. Leave out a date "
+                                   "to see what it brings, or to remove one with a problem.")
+        use = [sphx_frames[i] for i in pick] or sphx_frames
+        shown = [stack.add(use)]
+        if len(use) > 1:
+            # random noise of one date, from the difference of two dates (the stars cancel there)
+            sig1 = detect.noise(use[-1].image - use[0].image) / np.sqrt(2)
+            gain = float(np.sqrt(sum(f.n for f in use) / np.median([f.n for f in use])))
+            st.caption(f"**Depth gained:** {len(use)} dates ({sum(f.n for f in use)} photos) added → the random noise "
+                       f"is {gain:.1f}× lower than on one date (about {sig1 / gain:.3g} instead of {sig1:.3g} MJy/sr), "
+                       f"so stars about {2.5 * np.log10(gain):.1f} magnitudes fainter can show up (1 magnitude ≈ "
+                       "2.5× fainter). In crowded fields faint stars also blend together, which adding cannot undo.")
     elif mode == "sub":
         labels = [f.label.split(":")[0] for f in frames]
         c1, c2 = st.columns(2)
@@ -734,7 +777,15 @@ with tab_view:
                           format_func=lambda i: labels[i], help="The 'before' picture.")
         ib = c2.selectbox("Newer photo (B)", range(len(frames)), index=len(frames) - 1,
                           format_func=lambda i: labels[i], help="The 'after' picture. The view shows B − A.")
-        shown = [stack.subtract(frames[ib], frames[ia])]
+        diff = stack.subtract(frames[ib], frames[ia])
+        cut = st.slider("Hide changes smaller than (× noise)", 0.0, 6.0, 0.0, 0.5,
+                        help="Sets every pixel whose change is smaller than this many noise levels (σ) to 'no "
+                             "change' (white), so only clear changes stay coloured. 0 shows everything.")
+        if cut > 0:
+            import dataclasses
+            nz = detect.noise(diff.image)
+            diff = dataclasses.replace(diff, image=np.where(np.abs(diff.image) < cut * nz, 0.0, diff.image))
+        shown = [diff]
         diverging = True
         with st.expander("How to read the colours"):
             st.markdown("**Red** = brighter now (in B) · **white / grey** = no change (steady stars cancel out) · "
@@ -747,6 +798,14 @@ with tab_view:
                          help="time: oldest to newest. wavelength: from the bluest to the reddest infrared "
                               "colour inside the band.")
         al = sorted(by_uri.values(), key=lambda a: a.stamp.mjd if order == "time" else a.stamp.wavelength)
+        nflag = sum(bool(a.bad_near_target) for a in al)
+        if nflag == len(al):
+            st.caption(f"All {nflag} photos have warnings at the target (it is probably overexposed in this band), "
+                       "so none are hidden. Try another band.")
+        elif nflag and st.toggle(f"Hide photos with warnings at the target ({nflag} of {len(al)})", value=False,
+                               help="Leaves out single photos whose pixels at the target were marked unreliable by the "
+                                    "NASA pipeline (overexposed, cosmic-ray hits…)."):
+            al = [a for a in al if not a.bad_near_target] or al
         al = archive.evenly(al, config.MOVIE_CAP)
         shown = [stack.single_frame(a, i + 1) for i, a in enumerate(al)]
 

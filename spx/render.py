@@ -123,6 +123,18 @@ def motion_fig(track_e, track_n, pts):
     return fig
 
 
+def miss_fig(pts):
+    """How far each measured position is from the predicted one (arcsec), photo by photo."""
+    fig = go.Figure(go.Bar(
+        x=[p["label"] + "<br>" + p["date"] for p in pts], y=[p["off"] for p in pts],
+        marker_color=[epoch_color(p["epoch"]) if p["epoch"] else INK2 for p in pts],
+        error_y=dict(type="data", array=[p["err"] for p in pts], color=INK2, thickness=1.2, width=4),
+        hovertemplate="%{x}<br>%{y:.1f}″ from the prediction<extra></extra>"))
+    fig.add_hline(y=3.0, line=dict(color=INK2, dash="dot", width=1),
+                  annotation_text="half a SPHEREx pixel (3″)", annotation_font_color=INK2)
+    return _chart_layout(fig, "Photo", "Miss: measured − predicted (″)", height=300)
+
+
 def _rgb(z: np.ndarray, diverging: bool) -> np.ndarray:
     z = np.nan_to_num(z, nan=0.0)
     if diverging:
