@@ -943,10 +943,13 @@ with tab_view:
             if not 0 <= ss.get(k_, -1) < len(frames):
                 ss[k_] = max(0, d_)
         pair = (ss.h_a, ss.h_b)
-    found = [detect.find_stars(f.image, ss.h_sigma) for f in shown] if h_stars else None
+    def singles_of(f):  # the aligned single exposures behind an epoch photo: each star must be in most of them
+        return [by_uri[x.uri].image for x in f.stamps if x.uri in by_uri] if f.kind == "stack" else None
+    found = [detect.find_stars(f.image, ss.h_sigma, singles=singles_of(f)) for f in shown] if h_stars else None
     changed = []
     if h_change and len(frames) >= 2 and pair[0] != pair[1]:
-        changed = detect.changes(frames[pair[0]].image, frames[pair[1]].image, ss.h_sigma)[:40]
+        changed = detect.changes(frames[pair[0]].image, frames[pair[1]].image, ss.h_sigma,
+                                 singles_a=singles_of(frames[pair[0]]), singles_b=singles_of(frames[pair[1]]))[:40]
         yrs = abs(frames[pair[1]].mjd_mid - frames[pair[0]].mjd_mid) / 365.25
         for i, c in enumerate(changed):
             c["label"] = f"C{i + 1}"
