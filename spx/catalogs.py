@@ -73,6 +73,68 @@ def gaia_at(stars: list[dict], mjd: float):
     return ra2, dec2
 
 
+# --- WISE 2010 and 2MASS reference frames ------------------------------------------------
+def _sia(ra: float, dec: float, collection: str, band: str) -> list[dict]:
+    path = config.cache_dir() / f"sia_{collection}_{band}_{ra:.4f}_{dec:+.4f}.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    from astroquery.ipac.irsa import Irsa
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+    t = Irsa.query_sia(pos=(SkyCoord(ra * u.deg, dec * u.deg), 0.5 * u.arcmin), collection=collection)
+    rows = [dict(url=str(r["access_url"]), mjd=float(r["t_min"]), band=str(r["energy_bandpassname"]))
+            for r in t if str(r["dataproduct_subtype"]) == "science" and str(r["energy_bandpassname"]) == band]
+    rows.sort(key=lambda r: r["mjd"])
+    path.write_text(json.dumps(rows))
+    return rows
+
+
+def _cutout(url: str, ra: float, dec: float, size_arcmin: float):
+    import gzip
+    import hashlib
+    from astropy.io import fits
+    key = hashlib.sha1(f"{url}|{ra:.6f}|{dec:.6f}|{size_arcmin:.2f}".encode()).hexdigest()[:20]
+    path = config.cache_dir() / f"sv_{key}.fits"
+    if not path.exists():
+        from .cutouts import _get_with_retry
+        r = _get_with_retry(f"{url}?center={ra:.6f},{dec:.6f}&size={size_arcmin:.2f}arcmin", False)
+        raw = r.content
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
+        path.write_bytes(raw)
+    hd = fits.open(path)
+    return hd[0].data.astype(float), hd[0].header
+
+
+def survey_frames(ra: float, dec: float, sphx_band: str, size_arcmin: float) -> list[dict]:
+    """Older reference images for one SPHEREx band: WISE 2010 (first visit, up to 8 frames)
+    and 2MASS (~1998-2001). Each item: {survey, band, mjds, images: [(data, header)]}."""
+    out = []
+    wb = config.SURVEY_MATCH.get(sphx_band, {}).get("wise")
+    if wb:
+        rows = [r for r in _sia(ra, dec, "wise_allsky", wb) if r["mjd"] < config.WISE_CRYO_END_MJD]
+        if rows:  # first visit only: frames within a few days of the first one
+            visit = [r for r in rows if r["mjd"] - rows[0]["mjd"] < 5][:8]
+            imgs = []
+            for r in visit:
+                try:
+                    imgs.append(_cutout(r["url"], ra, dec, size_arcmin))
+                except Exception:
+                    continue
+            if imgs:
+                out.append(dict(survey="WISE", band=wb, mjds=[r["mjd"] for r in visit][:len(imgs)], images=imgs))
+    tb = config.SURVEY_MATCH.get(sphx_band, {}).get("2mass")
+    if tb:
+        rows = _sia(ra, dec, "twomass_allsky", tb)
+        if rows:
+            try:
+                out.append(dict(survey="2MASS", band=tb, mjds=[rows[0]["mjd"]],
+                                images=[_cutout(rows[0]["url"], ra, dec, size_arcmin)]))
+            except Exception:
+                pass
+    return out
+
+
 def gaia_hover(s: dict) -> str:
     plx = s["parallax"]
     dist = f" (~{1000 / plx:,.0f} pc)" if plx and plx > 0.2 else ""

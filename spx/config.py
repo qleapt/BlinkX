@@ -19,7 +19,13 @@ VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 GAIA_MAX_G = 19.0
 GAIA_TOP = 800
 GAIA_REF_MJD = 57388.5  # Gaia DR3 epoch 2016.0
-SPECTROPHOTOMETRY_TOOL ="https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry"
+# Older surveys shown before the SPHEREx frames (IRSA SIA collections; cutouts come back gzipped)
+SURVEY_MATCH = {
+    "D1": {"2mass": "J"}, "D2": {"2mass": "J"}, "D3": {"2mass": "K"},
+    "D4": {"wise": "W1"}, "D5": {"wise": "W2"}, "D6": {"wise": "W2"},
+}
+WISE_CRYO_END_MJD = 55414.0  # 2010-08-06, end of the 4-band cryogenic survey
+SPECTROPHOTOMETRY_TOOL = "https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry"
 
 # --- Instrument ----------------------------------------------------------------
 # band: (min um, max um, resolving power)
@@ -56,6 +62,8 @@ QUICK_PER_GROUP = 4         # quick look: exposures per band x epoch
 QUICK_MAX_TOTAL = 24
 LOAD_ALL_CAP = 80           # hard cap per band per "Load all"
 MOVIE_CAP = 60              # every-exposure movie
+SPEC_QUICK_PER_BAND = 12    # spectrum quick look: exposures per band (all six bands)
+SPEC_CAP_PER_BAND = 40      # spectrum "Load all"
 FOV_CHOICES = (3, 5, 10, 15)  # arcmin
 TAP_CACHE_HOURS = 12
 REFERENCE_MJD = 61041.0     # 2026-01-01: cutouts are centred on the target at this date

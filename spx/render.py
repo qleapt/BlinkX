@@ -119,6 +119,70 @@ def animation(frames, kind: str = "asinh", marks_per_frame=None, diverging: bool
     return fig
 
 
+# --- charts (dataviz: validated dark categorical order, fixed per epoch, never cycled) -------
+EPOCH_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#0ca30c", "#9085e9", "#e66767"]
+INK, INK2, GRID = "#f0efec", "#c3c2b7", "rgba(195,194,183,0.15)"
+
+
+def epoch_color(k: int) -> str:
+    return EPOCH_COLORS[(k - 1) % len(EPOCH_COLORS)]
+
+
+def _chart_layout(fig, xtitle, ytitle, height=420, logy=False):
+    fig.update_layout(
+        height=height, margin=dict(l=60, r=20, t=30, b=50), paper_bgcolor="#1a1a19", plot_bgcolor="#1a1a19",
+        font=dict(color=INK2, size=13), hovermode="closest",
+        hoverlabel=dict(bgcolor="#262624", font=dict(color=INK)),
+        legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, font=dict(color=INK2)))
+    fig.update_xaxes(title=xtitle, gridcolor=GRID, zeroline=False, linecolor=GRID)
+    fig.update_yaxes(title=ytitle, gridcolor=GRID, zeroline=False, linecolor=GRID,
+                     type="log" if logy else "linear")
+    return fig
+
+
+def _points(rows, k, x, name, show_legend=True):
+    """One epoch's points: filled = clean, hollow = flagged pixels in the aperture."""
+    traces = []
+    col = epoch_color(k)
+    for flagged in (False, True):
+        sel = [r for r in rows if bool(r["flags"]) == flagged and np.isfinite(r["flux"])]
+        if not sel:
+            continue
+        traces.append(go.Scatter(
+            x=[r[x] for r in sel], y=[r["flux"] for r in sel], mode="markers",
+            name=name if not flagged else f"{name} (flagged)", legendgroup=name,
+            showlegend=show_legend,
+            marker=dict(size=9, color="#1a1a19" if flagged else col, line=dict(width=2, color=col),
+                        symbol="circle"),
+            error_y=dict(type="data", array=[r["err"] for r in sel], color=col, thickness=1.2, width=0),
+            customdata=[[r["date"], r["wavelength"], r["err"], ", ".join(r["flags"]) or "none", r["band"]]
+                        for r in sel],
+            hovertemplate=("%{customdata[0]} · %{customdata[4]}<br>λ %{customdata[1]:.3f} µm<br>"
+                           "%{y:.4g} ± %{customdata[2]:.2g} mJy<br>flags: %{customdata[3]}<extra></extra>")))
+    return traces
+
+
+def spectrum_fig(rows_by_epoch: dict, logy: bool = False):
+    fig = go.Figure()
+    for k, rows in rows_by_epoch.items():
+        if rows:
+            label = f"Epoch {k}: {rows[0]['date']}"
+            for t in _points(rows, k, "wavelength", label):
+                fig.add_trace(t)
+    return _chart_layout(fig, "Wavelength (µm)", "Flux (mJy, quick look)", logy=logy)
+
+
+def lightcurve_fig(rows_by_epoch: dict, band: str, logy: bool = False):
+    fig = go.Figure()
+    for k, rows in rows_by_epoch.items():
+        rows = [r for r in rows if r["band"] == band]
+        if rows:
+            for t in _points(rows, k, "datetime", f"Epoch {k}"):
+                fig.add_trace(t)
+    fig.update_layout(showlegend=False)
+    return _chart_layout(fig, "Date", f"{band} flux (mJy)", height=340, logy=logy)
+
+
 def _rgb(z: np.ndarray, diverging: bool) -> np.ndarray:
     z = np.nan_to_num(z, nan=0.0)
     if diverging:

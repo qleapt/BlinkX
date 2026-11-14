@@ -113,7 +113,8 @@ def evenly(items: list, n: int) -> list:
 
 
 def select(exps: list[Exposure], band: str, quick: bool = True,
-           cap: int = config.LOAD_ALL_CAP) -> dict[int, list[Exposure]]:
+           cap: int = config.LOAD_ALL_CAP,
+           quick_total: int = config.QUICK_MAX_TOTAL) -> dict[int, list[Exposure]]:
     """Exposures of one band grouped by epoch (epochs defined on all bands), thinned.
     Quick look: <= QUICK_PER_GROUP per epoch and <= QUICK_MAX_TOTAL overall.
     Load all: <= cap overall, spread over epochs in proportion."""
@@ -128,7 +129,7 @@ def select(exps: list[Exposure], band: str, quick: bool = True,
         groups[k].sort(key=lambda x: x.mjd)
     ng = max(1, len(groups))
     if quick:
-        per = max(1, min(config.QUICK_PER_GROUP, config.QUICK_MAX_TOTAL // ng))
+        per = max(1, min(config.QUICK_PER_GROUP, quick_total // ng))
     else:
         per = max(1, cap // ng)
     return {k: evenly(v, per) for k, v in sorted(groups.items())}

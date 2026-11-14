@@ -172,6 +172,39 @@ def single_frame(a: Aligned, i: int) -> Frame:
                  st.wavelength, st.wavelength, "single", a.bad_near_target, [st], a.flagged)
 
 
+def survey_frame(item: dict, out_wcs: WCS, shape, ref_level: float, sphx_band: str) -> Frame | None:
+    """WISE/2MASS images: aligned, sky-subtracted, median-combined, scaled so the bright end
+    matches the SPHEREx frames (different instrument and units: display only)."""
+    from astropy.io import fits as _fits
+    imgs = []
+    for data, header in item["images"]:
+        if data is None or data.ndim != 2:
+            continue
+        h = _fits.Header(header)
+        if "A_ORDER" in h and not str(h.get("CTYPE1", "")).endswith("-SIP"):
+            h["CTYPE1"], h["CTYPE2"] = h["CTYPE1"] + "-SIP", h["CTYPE2"] + "-SIP"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            w = WCS(h, naxis=2)
+        d = data.astype(float)
+        fin = np.isfinite(d)
+        if fin.sum() < 20:
+            continue
+        d = d - np.median(d[fin])
+        imgs.append(align_array(d, w, out_wcs, shape))
+    if not imgs:
+        return None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        img = np.nanmedian(imgs, axis=0)
+    top = np.nanpercentile(img, 99.5) if np.isfinite(img).any() else 0
+    if top > 0 and ref_level > 0:
+        img = img * ref_level / top
+    m0, m1 = min(item["mjds"]), max(item["mjds"])
+    label = f"{item['survey']} {date_range(m0, m1)} · {item['band']} · {len(imgs)} frame{'s' * (len(imgs) > 1)}"
+    return Frame(fill_holes(img), label, sphx_band, m0, m1, len(imgs), kind="survey")
+
+
 def subtract(b: Frame, a: Frame) -> Frame:
     return Frame(b.image - a.image, f"{b.label.split(' · ')[0]}  minus  {a.label.split(' · ')[0]} · {a.band}",
                  a.band, a.mjd_start, b.mjd_end, a.n + b.n, kind="diff", flag_mask=_or_masks([a, b]),

@@ -5,13 +5,16 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from spx import archive, catalogs, config, cutouts, render, stack, targets
+from astropy.time import Time
+
+from spx import archive, catalogs, config, cutouts, photometry, render, stack, targets
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="wide")
 
 PRESET_BAND = {"Barnard's Star": "D4", "Epsilon Indi B": "D6", "WISE 0855-0714": "D6",
                "RW Aurigae": "D3", "R Draconis": "D3"}
-MODES = {"blink": "Blink epochs", "add": "Add (all epochs)", "sub": "Subtract (B − A)", "movie": "Every exposure"}
+MODES = {"blink": "Blink epochs", "add": "Add (all epochs)", "sub": "Subtract (B − A)", "movie": "Every exposure",
+         "spectrum": "Spectrum & light curve"}
 BAND_LABEL = {b: f"{b} · {lo:.2f}–{hi:.2f} µm" for b, (lo, hi, _) in config.BANDS.items()}
 
 qp = st.query_params
@@ -39,6 +42,7 @@ def _init():
     ss.stretch = "asinh"
     ss.speed = 700
     ss.gaia = qp.get("gaia", "1") != "0"
+    ss.survey = qp.get("old", "1") != "0"
     ss.showflags = False
 
 
@@ -62,6 +66,8 @@ with st.sidebar:
     st.selectbox("Band", list(config.BANDS), key="band", format_func=BAND_LABEL.get)
     st.radio("View", list(MODES), key="mode", format_func=MODES.get)
     st.toggle("Gaia DR3 stars (moved to each date)", key="gaia")
+    st.toggle("Start with older surveys (2MASS ~2000, WISE 2010)", key="survey",
+              help="J → D1/D2, Ks → D3, W1 → D4, W2 → D5/D6. Shown for comparison only (other telescope).")
     st.toggle("Show flagged pixels", key="showflags",
               help="Pink: the shown value comes from pixels the pipeline flagged (saturation, cosmic rays…).")
     with st.expander("Display"):
@@ -114,22 +120,106 @@ if not exps:
     st.stop()
 
 band = ss.band
+
+
+def fetch(todo, label):
+    with st.status(f"Fetching {len(todo)} {label} cutouts…", expanded=False) as status:
+        bar = st.progress(0.0)
+        out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45,
+                                        lambda d, n: bar.progress(d / n, f"{d}/{n} cutouts"))
+        status.update(label=f"{len(out)} {label} cutouts ready" + (f" ({nfail} failed)" if nfail else ""),
+                      state="complete")
+    if not out:
+        st.warning("No cutouts could be downloaded (archive busy?). Please try again in a minute.")
+        st.stop()
+    return out
+
+
+if ss.mode == "spectrum":
+    spec_key = f"specall|{tgt.name}"
+    spec_all = ss.get(spec_key, False)
+    todo, epoch_of = [], {}
+    for b in config.BANDS:
+        for k, g in archive.select(exps, b, quick=not spec_all, cap=config.SPEC_CAP_PER_BAND,
+                                   quick_total=config.SPEC_QUICK_PER_BAND).items():
+            for e in g:
+                todo.append(e)
+                epoch_of[e.uri] = k + 1
+    nep = max(epoch_of.values())
+    fold = nep > len(render.EPOCH_COLORS)  # dense fields: merge time bins so colours never repeat
+    stamps = fetch(todo, "all-band")
+    rows = []
+    for s in stamps:
+        m = photometry.measure(s, *targets.position_at(tgt, s.mjd))
+        k = epoch_of[s.uri]
+        m.update(date=targets.mjd_to_date(s.mjd), datetime=Time(s.mjd, format="mjd").iso,
+                 epoch=1 + (k - 1) * len(render.EPOCH_COLORS) // nep if fold else k)
+        rows.append(m)
+    by_epoch = {}
+    for r in sorted(rows, key=lambda r: (r["epoch"], r["wavelength"])):
+        by_epoch.setdefault(r["epoch"], []).append(r)
+    st.subheader(f"{tgt.name}: SPHEREx spectrum, 0.75–5.0 µm")
+    close = {}
+    try:  # warn when a Gaia neighbour falls inside the 12" aperture (SPHEREx pixels are 6.15")
+        nb, _ = catalogs.gaia_cone(round(ra0, 4), round(dec0, 4), 0.02)
+        mids = [min(r["mjd"] for r in rows), max(r["mjd"] for r in rows)]
+        for m in mids:
+            pr, pd_ = targets.position_at(tgt, m)
+            gr, gd = catalogs.gaia_at(nb, m)
+            sep = np.hypot((gr - pr) * np.cos(np.radians(pd_)), gd - pd_) * 3600
+            for s, d in zip(nb, sep):
+                if 2.0 < d < 15:  # < 2" is the target's own Gaia entry
+                    close.setdefault(s["id"], (s["g"], []))[1].append(d)
+        for g, ds in close.values():
+            st.warning(f"A Gaia star (G = {g:.1f}) lies {min(ds):.0f}–{max(ds):.0f}″ from the target on these dates. "
+                       "SPHEREx pixels are 6.15″, so its light blends into the measurement — especially at short "
+                       "wavelengths where a faint, cold target is dark.")
+    except Exception:
+        pass
+    logy = st.toggle("Logarithmic flux axis", value=False)
+    st.plotly_chart(render.spectrum_fig(by_epoch, logy), use_container_width=True)
+    st.caption("Each point is one exposure; SPHEREx sees each spot at a slightly different wavelength every "
+               "time, so many exposures together make a spectrum. Colours are survey epochs"
+               + (" (time bins merged)" if fold else "") + ". Hollow points have flagged pixels in the aperture "
+               "(often saturation): treat them with care. Quick look, not calibrated; for science use the "
+               f"[IRSA SPHEREx Spectrophotometry Tool]({config.SPECTROPHOTOMETRY_TOOL}).")
+    st.subheader(f"Light curve in {band} (choose the band in the sidebar)")
+    st.plotly_chart(render.lightcurve_fig(by_epoch, band, logy), use_container_width=True)
+    # plain-language change report per band: median clean flux, first vs last epoch
+    notes = []
+    for b in config.BANDS:
+        per = {k: [r for r in v if r["band"] == b and not r["flags"] and np.isfinite(r["flux"])]
+               for k, v in by_epoch.items()}
+        per = {k: v for k, v in per.items() if len(v) >= 2}
+        if len(per) >= 2:
+            k1, k2 = min(per), max(per)
+            f1, f2 = (np.median([r["flux"] for r in per[k]]) for k in (k1, k2))
+            e = np.hypot(*(1.25 * np.std([r["flux"] for r in per[k]]) / np.sqrt(len(per[k])) for k in (k1, k2)))
+            sig = abs(f2 - f1) / e if e > 0 else 0
+            word = "brighter" if f2 > f1 else "fainter"
+            notes.append(f"**{b}**: epoch {k2} is {abs(f2 / f1 - 1) * 100:.0f}% {word} than epoch {k1}"
+                         + (" — a real change is likely" if sig > 3 else " — within the scatter") + f" ({sig:.1f}σ)")
+    if notes:
+        st.markdown("**What changed?** (median of unflagged points; different wavelengths inside a band add "
+                    "scatter)\n\n- " + "\n- ".join(notes)
+                    + ("\n\n⚠ The neighbouring star above moves relative to the target, so part of any change "
+                       "can come from it entering or leaving the aperture." if close else ""))
+    with st.expander("Table of measurements"):
+        df = pd.DataFrame([{k: (", ".join(v) if k == "flags" else v) for k, v in r.items()
+                            if k not in ("x", "y", "datetime")} for r in rows]).sort_values(["band", "mjd"])
+        st.dataframe(df, hide_index=True, use_container_width=True)
+        st.download_button("Download CSV", df.to_csv(index=False), f"spherex_{tgt.name.replace(' ', '_')}.csv")
+    if not spec_all:
+        st.button(f"Load more exposures (up to {config.SPEC_CAP_PER_BAND} per band)",
+                  on_click=lambda: ss.__setitem__(spec_key, True))
+    st.stop()
+
 load_key = f"all|{tgt.name}|{band}"
 load_all = ss.get(load_key, False)
-groups = archive.renumber(archive.select(exps, band, quick=not load_all))
+groups = {k + 1: v for k, v in archive.select(exps, band, quick=not load_all).items()}
 n_band = sum(e.band == band for e in exps)
 todo = [e for g in groups.values() for e in g]
-size = ss.fov * 1.45  # margin so the rotated cutouts cover the square grid
-
-with st.status(f"Fetching {len(todo)} {band} cutouts…", expanded=False) as status:
-    bar = st.progress(0.0)
-    stamps, fails = cutouts.fetch_many(todo, ra0, dec0, size,
-                                       lambda d, n: bar.progress(d / n, f"{d}/{n} cutouts"))
-    status.update(label=f"{len(stamps)} {band} cutouts ready" + (f" ({fails} failed)" if fails else ""),
-                  state="complete")
-if not stamps:
-    st.warning("No cutouts could be downloaded (archive busy?). Please try again in a minute.")
-    st.stop()
+stamps = fetch(todo, band)  # cutouts are 1.45x the field so rotated frames cover the square grid
 
 wgrid, shape = stack.grid(ra0, dec0, ss.fov)
 arcsec_px = config.PIXEL_SCALE_ARCSEC / config.OVERSAMPLE
@@ -144,6 +234,23 @@ for k, g in groups.items():
     items = [by_uri[e.uri] for e in g if e.uri in by_uri]
     if items:
         frames.append(stack.stack_frame(items, f"Epoch {k}: "))
+sphx_frames = list(frames)
+
+
+@st.cache_data(ttl=7 * 24 * 3600, show_spinner=False)
+def survey(ra, dec, b, size):
+    return catalogs.survey_frames(ra, dec, b, size)
+
+
+if ss.survey and ss.mode in ("blink", "sub") and frames:
+    try:
+        with st.spinner("Fetching older WISE / 2MASS images…"):
+            items = survey(round(ra0, 5), round(dec0, 5), band, ss.fov * 1.45)
+        ref = float(np.nanmax([np.nanpercentile(f.image, 99.5) for f in sphx_frames]))
+        old = [stack.survey_frame(it, wgrid, shape, ref, band) for it in items]
+        frames = sorted([f for f in old if f is not None], key=lambda f: f.mjd_start) + frames
+    except Exception as e:
+        st.caption(f"Older survey images unavailable ({type(e).__name__}).")
 
 
 def target_mark(mjd):
@@ -189,11 +296,12 @@ with tab_view:
         if mode == "sub":
             st.info("Subtract needs at least two epochs in this band.")
     elif mode == "add":
-        shown = [stack.add(frames)]
+        shown = [stack.add(sphx_frames)]
     elif mode == "sub":
         labels = [f.label.split(":")[0] for f in frames]
         c1, c2 = st.columns(2)
-        ia = c1.selectbox("Epoch A (older)", range(len(frames)), format_func=lambda i: labels[i])
+        ia = c1.selectbox("Epoch A (older)", range(len(frames)), index=len(frames) - len(sphx_frames),
+                          format_func=lambda i: labels[i])
         ib = c2.selectbox("Epoch B (newer)", range(len(frames)), index=len(frames) - 1,
                           format_func=lambda i: labels[i])
         shown = [stack.subtract(frames[ib], frames[ia])]

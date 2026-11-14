@@ -148,6 +148,37 @@ def test_rotated_exposures_align():
     assert np.hypot(ca[0] - c, ca[1] - c) < 0.4
 
 
+def test_aperture_photometry_recovers_flux():
+    from spx import photometry
+    st = _stamp(0)  # Gaussian sigma 1.3 px, peak 100 MJy/sr, sky 1
+    m = photometry.measure(st, 150.0, 10.0)
+    omega = (6.15 / 206264.806) ** 2
+    total = 100 * 2 * np.pi * 1.3 ** 2 * omega * 1e9
+    enclosed = 1 - np.exp(-2.0 ** 2 / (2 * 1.3 ** 2))  # r = 2 px aperture
+    assert m["flux"] == pytest.approx(total * enclosed, rel=0.05)
+    assert m["err"] > 0 and m["flags"] == []
+
+
+def test_centroid_subpixel():
+    from spx import photometry
+    yy, xx = np.indices((40, 40))
+    img = 50 * np.exp(-((xx - 20.3) ** 2 + (yy - 18.7) ** 2) / (2 * 2.0 ** 2)) + np.random.default_rng(1).normal(0, .1, (40, 40))
+    x, y = photometry.centroid(img, 19, 19)
+    assert abs(x - 20.3) < 0.1 and abs(y - 18.7) < 0.1
+
+
+def test_gaia_propagation_and_subtract_pair():
+    from spx import catalogs
+    s = [dict(id=1, ra=269.448502525, dec=4.739420051, pmra=-801.551, pmdec=10362.394, parallax=547, g=8.2)]
+    r, d = catalogs.gaia_at(s, 57388.5 + 365.25)
+    assert (d[0] - 4.739420051) * 3600 == pytest.approx(10.362, abs=0.01)
+    a = stack.Frame(np.zeros((5, 5)), "Epoch 1: x", "D6", 0, 1, 1)
+    b = stack.Frame(np.zeros((5, 5)), "Epoch 2: y", "D6", 2, 3, 1)
+    a.image[1, 2], b.image[3, 2] = 10, 10
+    dif = stack.subtract(b, a).image
+    assert dif[3, 2] == 10 and dif[1, 2] == -10
+
+
 def test_masked_pixels_are_ignored():
     w, shape = stack.grid(150.0, 10.0, 3)
     good = stack.align(_stamp(0), w, shape)
