@@ -1,0 +1,10 @@
+streamlit
+astropy
+astroquery
+reproject
+numpy
+scipy
+pillow
+plotly
+requests
+pytest
