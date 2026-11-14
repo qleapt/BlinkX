@@ -161,7 +161,7 @@ def position_at(t: Target, mjd: float) -> tuple[float, float]:
     dt = (mjd - t.ref_mjd) / 365.25
     ddec = t.pmdec * dt / 3.6e6
     dec = t.dec + ddec
-    cosd = max(np.cos(np.radians((t.dec + dec) / 2)), 1e-6)
+    cosd = np.maximum(np.cos(np.radians((t.dec + dec) / 2)), 1e-6)   # works for one date or an array of dates
     ra = (t.ra + t.pmra * dt / 3.6e6 / cosd) % 360
     return ra, dec
 

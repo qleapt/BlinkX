@@ -1,4 +1,4 @@
-"""Background removal, reprojection to one north-up grid (2x oversampled), stacks, add/subtract."""
+"""Background removal, reprojection to one north-up grid (2x oversampled), stacks, subtract."""
 from __future__ import annotations
 
 import warnings
@@ -209,12 +209,3 @@ def subtract(b: Frame, a: Frame) -> Frame:
     return Frame(b.image - a.image, f"{b.label.split(' · ')[0]}  minus  {a.label.split(' · ')[0]} · {a.band}",
                  a.band, a.mjd_start, b.mjd_end, a.n + b.n, kind="diff", flag_mask=_or_masks([a, b]),
                  flags=sorted(set(a.flags) | set(b.flags)))
-
-
-def add(frames: list[Frame]) -> Frame:
-    w = [np.isfinite(f.image).astype(float) * f.n for f in frames]
-    img = weighted_mean([f.image for f in frames], w)
-    return Frame(img, f"All epochs added · {frames[0].band} · {sum(f.n for f in frames)} exp",
-                 frames[0].band, min(f.mjd_start for f in frames), max(f.mjd_end for f in frames),
-                 sum(f.n for f in frames), kind="sum", flag_mask=_or_masks(frames),
-                 flags=sorted({x for f in frames for x in f.flags}))

@@ -48,10 +48,12 @@ Your browser opens at **http://localhost:8501**.
 | **Challenge targets** | Five ready-made examples, one click each. |
 | **Field of view** | How much sky you see: 3, 5, 10 or 15 *arcminutes*. Bigger shows more neighbours. |
 | **Band** | Which slice of infrared light, D1 (0.75 µm, near red) to D6 (5 µm, warm-object light). |
-| **Load the Gaia star list** | Fetches ESA's Gaia stars; tick *Gaia stars* in the viewer to see them. |
-| **Older surveys** | Adds 2MASS (~2000) and WISE (2010) pictures before the SPHEREx ones. |
+| **Load the Gaia star list** | Off at first. Fetches ESA's Gaia stars; tick *Gaia stars* in the viewer to see them. |
+| **Older surveys** | Off at first. Adds 2MASS (~2000) and WISE (2010) pictures before the SPHEREx ones. |
 
-**Top of the page: the view buttons** Blink · Add · Subtract · Every exposure · Spectrum · Motion check.
+**Top of the page: the view buttons** Blink · Subtract · Every exposure · Spectrum · Motion check. Under them,
+*How to use* explains the view you are in, *What the bands mean* lists D1–D6 with their wavelength and photon
+energy, and *Brightness scales* shows what linear, sqrt, log and asinh do and when to use each.
 
 **The sky viewer** (all picture views)
 
@@ -88,7 +90,7 @@ Barnard's Star is the fastest-moving star in our sky. It is a small red dwarf ju
 5. Tick **Flagged pixels** in the viewer. The star's centre turns pink: it is so bright that it *saturates* the detector.
    The tool still shows it, but warns you.
 
-**Try:** set the field of view to **10′** and View back to **Blink**. The first frame is now a WISE picture from
+**Try:** switch on *Include older photos* in the sidebar, set the field of view to **10′** and View back to **Blink**. The first frame is now a WISE picture from
 2010, and the star is almost 3 arcminutes further south in it: 16 years of motion.
 
 ---
@@ -124,6 +126,10 @@ pair as one dot.
    the 2010 WISE picture.
 4. Read the cards below the chart: SPHEREx measures **4.71″ per year**, and the catalogue says **4.71″ per year**.
    The verdict: *Agrees*.
+
+5. Below, **What SPHEREx's own measurements say**: the same positions fitted on their own, the kind of object with
+   the evidence for and against, and **Where it goes next**: the path continued for the coming years (move *Predict
+   ahead*), with a widening band for the uncertainty and the catalogue's own prediction as a dotted line.
 
 **Try:** the same view for Barnard's Star. The agreement is looser (± 5″/yr) because that star is saturated,
 which makes its centre harder to pin down. Honest error bars are part of the result.
@@ -161,7 +167,6 @@ which still rises and falls with the star. It shows the trend, not a calibrated 
 - **Fast movers in our Solar System (asteroids, comets):** they move within hours, not months. Choose
   **Every exposure** and order **by time**. You see single exposures instead of epoch averages.
 - **Colour changes:** **Every exposure** ordered **by wavelength** flips through the colours of one spot.
-- **Deepest picture:** **Add** averages the dates you pick and says how much deeper the result is.
 
 Ideas: the closest star (Proxima Centauri) moves almost 4″ per year. Bright nebulae look different at
 1 µm and at 4 µm. Find a star that changed brightness between epochs.
@@ -183,9 +188,14 @@ path to check. The app does not point anything out: you look, then the tools mea
   the brightness there (sky removed). Click one to show that date.
 - With no markers the panel says *Nothing marked yet*. **Undo** / **Clear** remove marks;
   **Download CSV** saves them. Marks stay on your computer only.
-- **Check my find** (under the viewer): pick a mark and the app looks for a Gaia star at that spot *on that
-  date*. If there is one, the Motion check compares its catalogue path with what SPHEREx measured; **Its
-  spectrum** measures its colours. If Gaia has nothing there, the app says so and shows SPHEREx's own motion.
+- **Check my find** (under the viewer): choose the marks you made of *one* object (all are kept at first) and press
+  **Analyse the motion**. Three or more dates are best. The app measures each mark on its own photo, fits one path
+  through all of them, compares every pair, tests each mark against the others (a mark on the wrong star stands
+  out), looks for a Gaia star at every mark on its date, and says what the object probably is (standing still,
+  moving star, asteroid / comet, or not one object) with every reason listed. **Where it goes next** continues the
+  path for years (or hours, for an asteroid) with its uncertainty. *Also measure it on the other photos* (off at
+  first) adds the photos you did not mark, at the spot your marks predict. **Spectrum of the first mark** measures
+  its colours.
 - **Helpers** (under the viewer, off until you switch them on): *Detect stars* draws green crosses on the stars
   it finds; *Find what changed* lists what moved, brightened or faded between two dates, strongest first, labelled
   C1, C2… on the picture. Check each one by eye.
@@ -196,7 +206,7 @@ path to check. The app does not point anything out: you look, then the tools mea
 
 - **Share a view:** the address bar always holds your current settings. Copy it and send it. Example:
   `http://localhost:8501/?target=WISE+0855&band=D6&fov=10&mode=blink`
-  (`mode` can be `blink`, `add`, `sub`, `movie`, `spectrum`, `motion`).
+  (`mode` can be `blink`, `sub`, `movie`, `spectrum`, `motion`).
 - **Animated GIF:** **Download GIF** under the picture, for slides and social media.
 - **Data:** the **Photo list** tab lists every picture used, with a link to the original NASA file. The spectrum
   view exports a CSV.

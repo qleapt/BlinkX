@@ -135,24 +135,132 @@ def miss_fig(pts):
     return _chart_layout(fig, "Photo", "Miss: measured − predicted (″)", height=300)
 
 
-def pair_fig(de, dn, e1, e2, pred=None):
-    """One object on two photos: photo 1 at (0, 0), photo 2 at its measured offset; Gaia's prediction if any."""
+ACCENT, FUTURE = "#c98500", "#d55181"
+
+
+def _cone(e, n, se, sn):
+    """Polygon around a path, 1 sigma wide across it (the sideways uncertainty of the prediction)."""
+    e, n, se, sn = (np.asarray(v, float) for v in (e, n, se, sn))
+    if len(e) < 2:
+        return None, None
+    te, tn = np.gradient(e), np.gradient(n)
+    ln = np.hypot(te, tn)
+    ln[ln == 0] = 1
+    pe, pn = -tn / ln, te / ln                       # unit vector across the path
+    s = np.hypot(se * pe, sn * pn)
+    return np.concatenate([e + s * pe, (e - s * pe)[::-1]]), np.concatenate([n + s * pn, (n - s * pn)[::-1]])
+
+
+def future_fig(marks, path, future, catalogue=None, tick_label="year"):
+    """Sky-plane chart of one object: the marks (with error bars), the path fitted through all of them, its
+    continuation into the future with a 1-sigma uncertainty cone and dated ticks, and the catalogue path if any.
+    East is to the left, as on the sky. All values are offsets in arcsec from one reference point.
+    marks: dicts e, n, err, label, date, kind; path / future / catalogue: dicts of arrays e, n (future also se,
+    sn and ticks: list of (index, text))."""
     fig = go.Figure()
-    if pred is not None:
-        fig.add_trace(go.Scatter(x=[0, pred[0]], y=[0, pred[1]], mode="lines+markers", name="Gaia prediction",
-                                 line=dict(color=INK2, dash="dot", width=2),
-                                 marker=dict(size=[0, 11], symbol="circle-open", color=INK2)))
-    for name, x, y, e, k in (("photo 1", 0.0, 0.0, e1, 1), ("photo 2", de, dn, e2, 3)):
+    if future is not None and len(future["e"]) > 1:
+        ce, cn = _cone(future["e"], future["n"], future["se"], future["sn"])
+        if ce is not None:
+            fig.add_trace(go.Scatter(x=ce, y=cn, fill="toself", mode="lines", line=dict(width=0),
+                                     fillcolor="rgba(213,81,129,0.18)", name="prediction uncertainty (1σ)",
+                                     hoverinfo="skip"))
+    if catalogue is not None:
+        fig.add_trace(go.Scatter(x=catalogue["e"], y=catalogue["n"], mode="lines", name="catalogue prediction",
+                                 line=dict(color=INK2, width=1.5, dash="dot"), hoverinfo="skip"))
+    if path is not None:
+        fig.add_trace(go.Scatter(x=path["e"], y=path["n"], mode="lines", name="path fitted through the marks",
+                                 line=dict(color=ACCENT, width=2.5), hoverinfo="skip"))
+    if future is not None:
+        fig.add_trace(go.Scatter(x=future["e"], y=future["n"], mode="lines", name="predicted path (future)",
+                                 line=dict(color=FUTURE, width=2, dash="dash"), hoverinfo="skip"))
+        ticks = future.get("ticks") or []
+        if ticks:
+            idx = [i for i, _ in ticks]
+            fig.add_trace(go.Scatter(
+                x=[future["e"][i] for i in idx], y=[future["n"][i] for i in idx], mode="markers+text",
+                text=[t for _, t in ticks], textposition="top center", textfont=dict(color=FUTURE, size=11),
+                marker=dict(size=7, color=FUTURE, line=dict(width=1, color="#1a1a19")),
+                name=f"predicted position each {tick_label}",
+                customdata=[[t, future["se"][i], future["sn"][i]] for i, t in ticks],
+                hovertemplate=("%{customdata[0]}: east %{x:.1f}″, north %{y:.1f}″<br>± %{customdata[1]:.1f}″ east, "
+                               "± %{customdata[2]:.1f}″ north (1σ)<extra></extra>")))
+    for k, m in enumerate(marks):
+        col = epoch_color(k + 1)
+        found = m.get("kind") == "found"
         fig.add_trace(go.Scatter(
-            x=[x], y=[y], mode="markers", name=name, marker=dict(size=12, color=epoch_color(k)),
-            error_x=dict(type="data", array=[e], color=epoch_color(k), thickness=1.2, width=0),
-            error_y=dict(type="data", array=[e], color=epoch_color(k), thickness=1.2, width=0),
-            hovertemplate=f"{name}<br>east %{{x:.1f}}″, north %{{y:.1f}}″ ± {e:.1f}″<extra></extra>"))
-    fig.add_annotation(x=de, y=dn, ax=0, ay=0, xref="x", yref="y", axref="x", ayref="y", showarrow=True,
-                       arrowhead=2, arrowcolor=INK, text="")
-    _chart_layout(fig, "East offset (″, east is left)", "North offset (″)", height=420)
+            x=[m["e"]], y=[m["n"]], mode="markers+text", text=[m["label"]], textposition="bottom right",
+            textfont=dict(color=col, size=11), name=f"{m['label']} · {m['date']}" + (" (found)" if found else ""),
+            marker=dict(size=11, color="#1a1a19" if found else col, line=dict(width=2, color=col),
+                        symbol="diamond" if found else "circle"),
+            error_x=dict(type="data", array=[m["err"]], color=col, thickness=1.2, width=0),
+            error_y=dict(type="data", array=[m["err"]], color=col, thickness=1.2, width=0),
+            hovertemplate=(f"{m['label']} · {m['date']}<br>east %{{x:.1f}}″, north %{{y:.1f}}″ ± {m['err']:.1f}″"
+                           "<extra></extra>")))
+    _chart_layout(fig, "East offset (″, east is left)", "North offset (″)", height=560)
     fig.update_xaxes(autorange="reversed")
     fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_layout(legend=dict(orientation="v", y=1, x=1.02, yanchor="top"))
+    return fig
+
+
+def track_time_fig(marks, model, today=None):
+    """East and north offsets against time: the marks, the fitted model and its prediction with a 1-sigma band.
+    marks: dicts e, n, err, label, datetime; model: dict datetime, e, n, se, sn, future (bool array)."""
+    from plotly.subplots import make_subplots
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                        subplot_titles=("East offset (″)", "North offset (″)"))
+    t = list(model["datetime"])
+    fut = np.asarray(model["future"], bool)
+    for row, key, skey in ((1, "e", "se"), (2, "n", "sn")):
+        v, s = np.asarray(model[key]), np.asarray(model[skey])
+        fig.add_trace(go.Scatter(x=t + t[::-1], y=list(v + s) + list((v - s)[::-1]), fill="toself", mode="lines",
+                                 line=dict(width=0), fillcolor="rgba(213,81,129,0.18)", showlegend=row == 1,
+                                 name="uncertainty (1σ)", hoverinfo="skip"), row=row, col=1)
+        for sel, name, col, dash in ((~fut, "fitted path", ACCENT, "solid"), (fut, "prediction", FUTURE, "dash")):
+            if sel.any():
+                fig.add_trace(go.Scatter(x=[x for x, k in zip(t, sel) if k], y=v[sel], mode="lines", name=name,
+                                         line=dict(color=col, width=2, dash=dash), showlegend=row == 1,
+                                         hoverinfo="skip"), row=row, col=1)
+        for k, m in enumerate(marks):
+            col = epoch_color(k + 1)
+            fig.add_trace(go.Scatter(
+                x=[m["datetime"]], y=[m[key]], mode="markers", name=m["label"], showlegend=False,
+                marker=dict(size=9, color=col, line=dict(width=1.5, color="#1a1a19")),
+                error_y=dict(type="data", array=[m["err"]], color=col, thickness=1.2, width=0),
+                hovertemplate=f"{m['label']}<br>%{{x}}<br>%{{y:.1f}}″ ± {m['err']:.1f}″<extra></extra>"),
+                row=row, col=1)
+    if today:
+        fig.add_vline(x=today, line=dict(color=INK2, dash="dot", width=1))
+    _chart_layout(fig, "", "", height=520)
+    fig.update_annotations(font=dict(color=INK2, size=12))
+    return fig
+
+
+def class_fig(prob: dict, names: dict):
+    """How strongly the evidence points to each kind of object (horizontal bars, best first)."""
+    order = sorted(prob, key=prob.get)
+    colors = {"static": "#3987e5", "pm_star": ACCENT, "solar_system": "#199e70", "mismatch": "#e66767"}
+    fig = go.Figure(go.Bar(x=[100 * prob[k] for k in order], y=[names[k] for k in order], orientation="h",
+                           marker_color=[colors.get(k, INK2) for k in order],
+                           text=[f"{100 * prob[k]:.0f}%" for k in order], textposition="outside",
+                           hovertemplate="%{y}: %{x:.0f}%<extra></extra>"))
+    _chart_layout(fig, "How strongly the evidence points to it (%)", "", height=230)
+    fig.update_xaxes(range=[0, 115])
+    fig.update_layout(margin=dict(l=10, r=20, t=10, b=45))
+    fig.update_yaxes(automargin=True, type="category")
+    return fig
+
+
+def stretch_fig():
+    """The four brightness scales: how a pixel's brightness (0 = darkest level, 1 = brightest) becomes grey."""
+    x = np.linspace(0, 1, 201)
+    fig = go.Figure()
+    for kind, col in (("linear", INK2), ("sqrt", "#3987e5"), ("log", "#199e70"), ("asinh", ACCENT)):
+        fig.add_trace(go.Scatter(x=x, y=stretch(x, 0, 1, kind), mode="lines", name=kind,
+                                 line=dict(color=col, width=2.5),
+                                 hovertemplate=f"{kind}: brightness %{{x:.2f}} → grey %{{y:.2f}}<extra></extra>"))
+    _chart_layout(fig, "Pixel brightness (0 = Dark level, 1 = Bright level)", "Grey on screen (0 = black, 1 = white)",
+                  height=330)
     return fig
 
 

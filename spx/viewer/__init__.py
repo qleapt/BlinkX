@@ -1,4 +1,4 @@
-"""The sky viewer: one in-browser canvas for every image view (Blink, Add, Subtract, Every exposure).
+"""The sky viewer: one in-browser canvas for every image view (Blink, Subtract, Every exposure).
 
 Python sends the pixel values themselves (not pictures), packed losslessly enough into PNGs: the
 16-bit code of each pixel sits in the red and green channels, flagged pixels in blue. The code is

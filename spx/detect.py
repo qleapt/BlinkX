@@ -96,6 +96,19 @@ def _wing_radius(ratio: float, size: float) -> float:
     return 2.0 + 4.5 * max(size, 1.0) * np.log10(max(ratio, 1.0))
 
 
+def seen_fraction(singles, x: float, y: float) -> float | None:
+    """Share of the single exposures in which something stands above their noise at (x, y), or None."""
+    if not singles:
+        return None
+    seen = n = 0
+    for s in singles:
+        f, k = aperture(s, x, y)
+        if np.isfinite(f):
+            n += 1
+            seen += f > 1.5 * OVERSAMPLE_NOISE * np.sqrt(max(k, 1)) * noise(s)
+    return seen / n if n else None
+
+
 def _confirmed(singles, x: float, y: float, min_frac: float = 0.5) -> bool:
     """Seen in most single exposures, and not carried by one of them (cosmic ray, hot pixel)."""
     if not singles:

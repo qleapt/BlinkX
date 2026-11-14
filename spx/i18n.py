@@ -20,10 +20,9 @@ LANGS = {"en": "English", "tr": "Türkçe"}
 
 TR: dict[str, str] = {
     # --- views ------------------------------------------------------------------------------
-    "Blink": "Blink", "Add": "Topla", "Subtract": "Çıkar", "Every exposure": "Her poz", "Spectrum": "Tayf",
+    "Blink": "Blink", "Subtract": "Çıkar", "Every exposure": "Her poz", "Spectrum": "Tayf",
     "Motion check": "Hareket kontrolü",
     "flip between dates: movers jump": "tarihler arasında geçiş: hareket edenler sıçrar",
-    "stack all dates: see faint things": "tüm tarihleri üst üste koy: sönük cisimleri gör",
     "newer − older: see only what changed": "yeni − eski: yalnızca değişeni gör",
     "one frame per single photo": "her tek fotoğraf için bir kare",
     "brightness at each infrared colour": "her kızılötesi renkte parlaklık",
@@ -393,17 +392,6 @@ TR: dict[str, str] = {
         "kırmızı. **Parlaklığı değişen** bir yıldız tek bir kırmızı (parladı) veya mavi (söndü) leke bırakır. Çok "
         "parlak yıldızların çevresindeki küçük halkalar kusurlu çıkarmanın artıklarıdır, gerçek değişim değildir. Renk "
         "ne kadar güçlüyse değişim o kadar büyüktür.",
-    "Dates to add together": "Toplanacak tarihler",
-    "Adding more dates lowers the noise, so fainter things show up. Leave out a date to see what it brings, or to "
-    "remove one with a problem.":
-        "Daha fazla tarih eklemek gürültüyü azaltır, böylece daha sönük cisimler görünür. Neler kattığını görmek ya da "
-        "sorunlu bir tarihi çıkarmak için bir tarihi dışarıda bırakın.",
-    "**Depth gained:** {} dates ({} photos) added → the random noise is {}× lower than on one date (about {} instead "
-    "of {} MJy/sr), so stars about {} magnitudes fainter can show up (1 magnitude ≈ 2.5× fainter). In crowded fields "
-    "faint stars also blend together, which adding cannot undo.":
-        "**Kazanılan derinlik:** {} tarih ({} fotoğraf) toplandı → rastgele gürültü tek bir tarihe göre {} kat daha "
-        "düşük (yaklaşık {} yerine {} MJy/sr), bu yüzden yaklaşık {} kadir daha sönük yıldızlar görünebilir (1 kadir ≈ "
-        "2,5 kat daha sönük). Kalabalık alanlarda sönük yıldızlar ayrıca birbirine karışır; toplamak bunu düzeltemez.",
     "Order": "Sıra", "time": "zaman",
     "time: oldest to newest. wavelength: from the bluest to the reddest infrared colour inside the band.":
         "zaman: en eskiden en yeniye. dalga boyu: bant içindeki en mavi kızılötesi renkten en kırmızısına.",
@@ -530,6 +518,275 @@ TR: dict[str, str] = {
         "bayraklar: %{customdata[3]}<extra></extra>",
 }
 
+# --- explainers, Check my find and the motion analysis (spx/motion.py, app.py) --------------------------------------
+TR.update({
+    "How to use {} (30 seconds)": "{} nasıl kullanılır (30 saniye)",
+    "Hover over the small question-mark icons for short explanations; *Words used here* in the sidebar explains the "
+    "astronomy terms.":
+        "Kısa açıklamalar için küçük soru işaretlerinin üzerine gelin; kenar çubuğundaki *Burada kullanılan sözcükler* "
+        "astronomi terimlerini açıklar.",
+    "What the bands mean (infrared colours and their energy)": "Bantlar ne anlama gelir (kızılötesi renkler ve enerjileri)",
+    "Brightness scales: linear, sqrt, log, asinh (what they do, where to use them)":
+        "Parlaklık ölçekleri: linear, sqrt, log, asinh (ne yaparlar, nerede kullanılırlar)",
+    "Pixel brightness (0 = Dark level, 1 = Bright level)": "Piksel parlaklığı (0 = Koyu düzeyi, 1 = Parlak düzeyi)",
+    "Grey on screen (0 = black, 1 = white)": "Ekrandaki gri (0 = siyah, 1 = beyaz)",
+    # Check my find
+    "Mark the same object on two or more photos (different dates) to measure how it moves. Every mark is compared "
+    "with every other one, and the path is predicted into the future.":
+        "Nasıl hareket ettiğini ölçmek için aynı cismi iki veya daha fazla fotoğrafta (farklı tarihlerde) işaretleyin. "
+        "Her işaret diğer tüm işaretlerle karşılaştırılır ve yol geleceğe doğru tahmin edilir.",
+    "Marks of one object (all of them are compared together)": "Tek bir cismin işaretleri (hepsi birlikte karşılaştırılır)",
+    "Keep the marks you made on the same object, on different photos. Leave out marks of other objects. Three or more "
+    "marks let the app check that they lie on one path and spot a mark that does not belong.":
+        "Aynı cisim üzerinde, farklı fotoğraflarda yaptığınız işaretleri tutun; başka cisimlerin işaretlerini çıkarın. "
+        "Üç veya daha fazla işaret, uygulamanın hepsinin tek bir yol üzerinde olduğunu denetlemesini ve uymayan bir "
+        "işareti bulmasını sağlar.",
+    "Analyse the motion of these {} marks": "Bu {} işaretin hareketini çözümle",
+    "Fits one path through all the marks at once, tests whether the object stands still, drifts like a star (with or "
+    "without the yearly parallax wobble) or curves like an asteroid, says what kind of object it probably is and why, "
+    "and predicts where it will be in the coming years. Each mark is measured only on the photo it was made on.":
+        "Tüm işaretlerden aynı anda tek bir yol geçirir; cismin durup durmadığını, bir yıldız gibi kayıp kaymadığını "
+        "(yıllık paralaks salınımıyla ya da onsuz) veya bir asteroit gibi eğri çizip çizmediğini sınar; muhtemelen ne "
+        "tür bir cisim olduğunu ve nedenini söyler ve önümüzdeki yıllarda nerede olacağını tahmin eder. Her işaret "
+        "yalnızca yapıldığı fotoğrafta ölçülür.",
+    "These marks are all on the same photo: pick marks made on at least two different photos.":
+        "Bu işaretlerin hepsi aynı fotoğrafta: en az iki farklı fotoğrafta yapılmış işaretler seçin.",
+    # the motion analysis page
+    "Motion of your {} marks ({})": "{} işaretinizin hareketi ({})",
+    "Also measure it on the other photos, at the spot your marks predict":
+        "Diğer fotoğraflarda da, işaretlerinizin öngördüğü noktada ölç",
+    "Off by default: the app does not look for things by itself. When on, the path through your marks predicts where "
+    "the object should be on every other photo of this view; where a clear spot sits there (5σ, within the "
+    "prediction's uncertainty), it is measured and added (diamonds, F1, F2…). More dates make the path, the parallax "
+    "and the prediction much better.":
+        "Varsayılan olarak kapalı: uygulama kendi başına bir şey aramaz. Açıkken, işaretlerinizden geçen yol cismin bu "
+        "görünümdeki diğer her fotoğrafta nerede olması gerektiğini öngörür; orada belirgin bir nokta varsa (5σ, "
+        "tahminin belirsizliği içinde) ölçülür ve eklenir (elmaslar, F1, F2…). Daha çok tarih; yolu, paralaksı ve "
+        "tahmini çok daha iyi yapar.",
+    "Found on {} more photo(s) at the predicted spot.": "Öngörülen noktada {} fotoğrafta daha bulundu.",
+    "Nothing clear at the predicted spot on the other photos.": "Diğer fotoğraflarda öngörülen noktada belirgin bir şey yok.",
+    "Your marks are hours apart: the other photos are months away, too far to follow an asteroid there.":
+        "İşaretleriniz saatler arayla: diğer fotoğraflar aylarca uzakta, bir asteroidi orada izlemek için fazla uzak.",
+    "Marks {} were made on photos that are not in this view (another band or field?), so they are left out.":
+        "{} işaretleri bu görünümde olmayan fotoğraflarda yapılmış (başka bant veya alan?), bu yüzden dışarıda bırakıldı.",
+    "At least two of the marks must be on different photos of this view. Go back and mark the object on two or more "
+    "dates.":
+        "İşaretlerden en az ikisi bu görünümün farklı fotoğraflarında olmalı. Geri dönün ve cismi iki veya daha fazla "
+        "tarihte işaretleyin.",
+    "{} positions on {} photos, spanning {}. Every mark is measured only on the photo it was made on, then all are "
+    "fitted together. {}":
+        "{1} fotoğrafta {0} konum, {2} boyunca. Her işaret yalnızca yapıldığı fotoğrafta ölçülür, sonra hepsi birlikte "
+        "uydurulur. {3}",
+    "Every mark matches the same Gaia DR3 star, {} (G = {}).": "Her işaret aynı Gaia DR3 yıldızıyla eşleşiyor: {} (G = {}).",
+    "No Gaia star within {}″ of any mark (on each mark's date).":
+        "Hiçbir işaretin {}″ yakınında (her işaretin kendi tarihinde) Gaia yıldızı yok.",
+    "The Gaia catalogue could not be reached right now, so the catalogue check is left out.":
+        "Gaia kataloğuna şu anda ulaşılamadı, bu yüzden katalog denetimi yapılmadı.",
+    "Some marks match Gaia stars and some do not (or different ones), so the catalogue check is left out. If the "
+    "object moves, your marks may be on neighbouring stars.":
+        "Bazı işaretler Gaia yıldızlarıyla eşleşiyor, bazıları eşleşmiyor (veya farklı yıldızlarla), bu yüzden katalog "
+        "denetimi yapılmadı. Cisim hareket ediyorsa işaretleriniz komşu yıldızlarda olabilir.",
+    "What it probably is: {} ({}%)": "Muhtemelen ne: {} (%{})",
+    "#### What it probably is: {} ({}%)": "#### Muhtemelen ne: {} (%{})",
+    "#### Not clear yet. Most likely: {} ({}%)": "#### Henüz net değil. En olası: {} (%{})",
+    "#### Where it goes next: predicted path": "#### Sonra nereye gidecek: tahmini yol",
+    "#### What SPHEREx's own measurements say about {}": "#### SPHEREx'in kendi ölçümleri {} hakkında ne diyor",
+    "**The evidence, step by step**": "**Kanıtlar, adım adım**",
+    "{}″/yr": "{}″/yıl", "{}″/h": "{}″/sa", "under {}″/yr": "{}″/yıl altında", "{}° ({})": "{}° ({})",
+    "Not clear yet. Most likely: {} ({}%)": "Henüz net değil. En olası: {} (%{})",
+    "The evidence, step by step": "Kanıtlar, adım adım",
+    "For": "Lehine", "Against": "Aleyhine",
+    "An algorithmic estimate from the evidence above, not a certainty: always look at the photos too. The percentages "
+    "say how strongly the evidence points to each kind of object.":
+        "Yukarıdaki kanıtlardan algoritmik bir tahmin, kesinlik değil: fotoğraflara da mutlaka bakın. Yüzdeler, "
+        "kanıtların her cisim türünü ne kadar güçlü gösterdiğini söyler.",
+    "How strongly the evidence points to it (%)": "Kanıtın onu ne kadar güçlü gösterdiği (%)",
+    "Standing still: a background star or galaxy": "Duruyor: bir arka plan yıldızı veya gökada",
+    "Moving star: a nearby star or brown dwarf with a steady proper motion":
+        "Hareketli yıldız: düzgün öz hareketi olan yakın bir yıldız veya kahverengi cüce",
+    "Solar System object: an asteroid or comet": "Güneş Sistemi cismi: bir asteroit veya kuyruklu yıldız",
+    "Not one object: the marks do not belong together, or an artefact":
+        "Tek bir cisim değil: işaretler birbirine ait değil ya da bir yapay iz",
+    "Standing still": "Duruyor", "Moving star": "Hareketli yıldız", "Asteroid / comet": "Asteroit / kuyruklu yıldız",
+    "Not one object": "Tek cisim değil",
+    "Speed": "Hız", "Direction": "Yön", "Path model": "Yol modeli", "Distance (from parallax)": "Uzaklık (paralakstan)",
+    "Consistency (χ²ν)": "Tutarlılık (χ²ν)",
+    "No motion was found; it is slower than this (3σ).": "Hareket bulunmadı; bundan daha yavaş (3σ).",
+    "How fast it moves across the sky, from one path fitted through all the marks at once (not from two marks only). "
+    "± is the uncertainty (1σ).":
+        "Gökyüzünde ne kadar hızlı hareket ettiği; tüm işaretlerden aynı anda geçirilen tek bir yoldan (yalnızca iki "
+        "işaretten değil). ± belirsizliktir (1σ).",
+    "Direction of motion, in degrees from north towards east.": "Hareketin yönü, kuzeyden doğuya doğru derece cinsinden.",
+    "still": "duruyor", "drift": "kayma", "drift + parallax": "kayma + paralaks", "curved": "eğri",
+    "standing still": "duruyor", "steady drift (proper motion)": "düzgün kayma (öz hareket)",
+    "steady drift + yearly parallax wobble": "düzgün kayma + yıllık paralaks salınımı", "curved path": "eğri yol",
+    "Parallax π is the yearly wobble; distance in parsecs = 1 / π (1 pc = 3.26 light-years).":
+        "Paralaks π yıllık salınımdır; parsek cinsinden uzaklık = 1 / π (1 pc = 3,26 ışık yılı).",
+    "How well the marks follow one path: about 1 = within the measuring errors; much more than 1 = the marks scatter "
+    "more than they should (a wrong mark, a blend, or different objects).":
+        "İşaretlerin tek bir yolu ne kadar iyi izlediği: yaklaşık 1 = ölçüm hataları içinde; 1'den çok büyük = işaretler "
+        "olması gerekenden fazla saçılıyor (yanlış bir işaret, karışma veya farklı cisimler).",
+    "With two marks any path fits exactly: mark a third photo to test it.":
+        "İki işaretle her yol tam uyar: sınamak için üçüncü bir fotoğrafı işaretleyin.",
+    "Where it goes next: predicted path": "Sonra nereye gidecek: tahmini yol",
+    "Predict ahead (years)": "İleriye tahmin (yıl)", "Predict ahead (hours)": "İleriye tahmin (saat)",
+    "How many years past today to continue the path.": "Yolun bugünden kaç yıl sonrasına kadar sürdürüleceği.",
+    "How far past the last mark to continue the path.": "Yolun son işaretten ne kadar sonrasına kadar sürdürüleceği.",
+    "The marks probably do not belong to one object, so the prediction below is not reliable. Leave out the mark that "
+    "does not fit (see *Every mark against the others* below) and try again.":
+        "İşaretler büyük olasılıkla tek bir cisme ait değil, bu yüzden aşağıdaki tahmin güvenilir değil. Uymayan işareti "
+        "çıkarın (aşağıda *Her işaret diğerlerine karşı*) ve yeniden deneyin.",
+    "Asteroids and comets follow curved orbits, so this straight-line guess holds for hours to a few days only. To "
+    "follow a new one for longer, its positions go to the Minor Planet Center, which computes an orbit.":
+        "Asteroitler ve kuyruklu yıldızlar eğri yörüngeler izler, bu yüzden bu düz çizgi tahmini yalnızca saatlerden "
+        "birkaç güne kadar geçerlidir. Yeni birini daha uzun izlemek için konumları, yörüngeyi hesaplayan Minor Planet "
+        "Center'a gönderilir.",
+    "**Reading the plot:** coloured points are the marks (east to the left, as on the sky), with their measuring "
+    "error. The solid line is the one path fitted through all of them; the dashed line continues it into the future, "
+    "with the date of each predicted point. The shaded band is the uncertainty (1σ): it widens the further ahead we "
+    "look, because a small error in the speed grows with time.":
+        "**Grafiği okumak:** renkli noktalar işaretlerdir (gökyüzündeki gibi doğu solda), ölçüm hatalarıyla. Düz çizgi "
+        "hepsinden geçirilen tek yoldur; kesikli çizgi onu, her tahmini noktanın tarihiyle geleceğe sürdürür. Gölgeli "
+        "bant belirsizliktir (1σ): ileriye baktıkça genişler, çünkü hızdaki küçük bir hata zamanla büyür.",
+    "The dotted grey line is the catalogue's own prediction.": "Noktalı gri çizgi kataloğun kendi tahminidir.",
+    "The same path against time: east and north position separately. A steady drift is a straight line; the yearly "
+    "parallax wobble makes it wave; an orbit makes it bend. The dotted line is today.":
+        "Aynı yol zamana karşı: doğu ve kuzey konumu ayrı ayrı. Düzgün kayma düz bir çizgidir; yıllık paralaks salınımı "
+        "onu dalgalandırır; bir yörünge onu büker. Noktalı çizgi bugündür.",
+    "prediction uncertainty (1σ)": "tahmin belirsizliği (1σ)", "catalogue prediction": "katalog tahmini",
+    "path fitted through the marks": "işaretlerden geçirilen yol", "predicted path (future)": "tahmini yol (gelecek)",
+    "predicted position each year": "her yıl tahmini konum", "predicted position each hour step": "her saat adımında tahmini konum",
+    "uncertainty (1σ)": "belirsizlik (1σ)", "fitted path": "uydurulan yol", "prediction": "tahmin",
+    "East offset (″)": "Doğu kayması (″)", "North offset (″)": "Kuzey kayması (″)",
+    "When": "Ne zaman", "± east (″)": "± doğu (″)", "± north (″)": "± kuzey (″)",
+    "From the last mark (″)": "Son işaretten (″)", "Catalogue minus measured (″)": "Katalog eksi ölçülen (″)",
+    "Download the prediction (CSV)": "Tahmini indir (CSV)",
+    "Predicted positions with their uncertainty.": "Belirsizlikleriyle tahmini konumlar.",
+    "Every pair of marks compared": "Her işaret çifti karşılaştırıldı", "Pair": "Çift", "Time apart": "Aradaki süre",
+    "Moved (″)": "Hareket (″)", "± (″)": "± (″)", "Real move? (σ)": "Gerçek hareket mi? (σ)",
+    "Off the fitted path (″)": "Uydurulan yoldan sapma (″)",
+    "Each pair on its own: how far the object moved between the two photos, in which direction and how fast. 'Real "
+    "move?' counts measuring errors: above 3σ the move is real. 'Off the fitted path' compares the pair's move with "
+    "the path through all marks: pairs that agree have small values.":
+        "Her çift kendi başına: cismin iki fotoğraf arasında ne kadar, hangi yöne ve ne hızla hareket ettiği. 'Gerçek "
+        "hareket mi?' ölçüm hatalarını sayar: 3σ üstünde hareket gerçektir. 'Uydurulan yoldan sapma' çiftin hareketini "
+        "tüm işaretlerden geçen yolla karşılaştırır: uyuşan çiftlerin değerleri küçüktür.",
+    "Every mark against the others": "Her işaret diğerlerine karşı", "Mark": "İşaret", "Date": "Tarih",
+    "Off the path of the other marks (″)": "Diğer işaretlerin yolundan sapma (″)", "Verdict": "Karar",
+    "fits": "uyuyor", "slightly off": "biraz sapık", "does not fit": "uymuyor",
+    "Each mark is left out in turn; the other marks draw a path, and the table says how far the left-out mark is from "
+    "it. A mark that 'does not fit' is probably on another object or badly placed: leave it out in *Check my find* and "
+    "analyse again.":
+        "Her işaret sırayla dışarıda bırakılır; diğer işaretler bir yol çizer ve tablo, dışarıda bırakılan işaretin bu "
+        "yoldan ne kadar uzak olduğunu söyler. 'Uymuyor' denen işaret büyük olasılıkla başka bir cisimde veya kötü "
+        "konmuştur: *Bulduğumu denetle*'de çıkarın ve yeniden çözümleyin.",
+    "With two marks, each one is needed to draw the path, so they cannot check each other. Mark the object on a third "
+    "photo to test them.":
+        "İki işaretle her biri yolu çizmek için gereklidir, bu yüzden birbirlerini denetleyemezler. Sınamak için cismi "
+        "üçüncü bir fotoğrafta işaretleyin.",
+    "The models that were tried": "Denenen modeller", "Degrees of freedom": "Serbestlik derecesi",
+    "Improvement": "İyileşme", "Chosen": "Seçilen", "yes": "evet",
+    "χ² adds up how far each mark is from the path, in measuring errors (squared). A richer model is chosen only when "
+    "it lowers χ² by much more than chance would (improvement > 11.8 for motion, > 9 for parallax, > 16 for a curve), "
+    "after scaling by the scatter that is left.":
+        "χ², her işaretin yoldan ne kadar uzak olduğunu ölçüm hatası cinsinden (karesi alınarak) toplar. Daha zengin bir "
+        "model ancak χ²'yi şansın yapabileceğinden çok daha fazla düşürürse seçilir (hareket için iyileşme > 11,8, "
+        "paralaks için > 9, eğri için > 16), kalan saçılmaya göre ölçeklendikten sonra.",
+    "How the motion analysis works": "Hareket çözümlemesi nasıl çalışır",
+    "Seen in single exposures": "Tek pozlarda görülme", "Photo": "Fotoğraf",
+    "Watch it move: every photo with the predicted spot (orange ring)":
+        "Hareketini izle: tahmini noktayla her fotoğraf (turuncu halka)",
+    "The orange ring follows the path fitted through your marks, also on the photos you did not mark: if the object "
+    "sits in the ring there too, the prediction works.":
+        "Turuncu halka, işaretlerinizden geçirilen yolu işaretlemediğiniz fotoğraflarda da izler: cisim oralarda da "
+        "halkanın içindeyse tahmin çalışıyor demektir.",
+    "What SPHEREx's own measurements say about {}": "SPHEREx'in kendi ölçümleri {} hakkında ne diyor",
+    "The same analysis as for your own finds: all measured positions fitted together, the kind of object estimated "
+    "from the evidence, and the path predicted into the future, next to the catalogue's prediction.":
+        "Kendi bulduklarınızla aynı çözümleme: tüm ölçülen konumlar birlikte uydurulur, cisim türü kanıtlardan tahmin "
+        "edilir ve yol, kataloğun tahminiyle yan yana geleceğe doğru tahmin edilir.",
+    "The same analysis as for your own finds: all measured positions fitted together, the kind of object estimated "
+    "from the evidence, and the path predicted into the future.":
+        "Kendi bulduklarınızla aynı çözümleme: tüm ölçülen konumlar birlikte uydurulur, cisim türü kanıtlardan tahmin "
+        "edilir ve yol geleceğe doğru tahmin edilir.",
+    # the evidence lines (spx/motion.py)
+    "No motion between the positions ({} apart): they agree within the measuring error (any motion is below {}″ per "
+    "year at 3σ).":
+        "Konumlar arasında hareket yok ({} arayla): ölçüm hatası içinde uyuşuyorlar (herhangi bir hareket 3σ düzeyinde "
+        "yılda {}″'den az).",
+    "But the dates are too close together (or the errors too big) to rule out a drift of up to {}″ per year, which a "
+    "nearby star could have; there is even a hint of motion ({}σ). More dates, or the older 2MASS / WISE photos "
+    "(sidebar), settle it.":
+        "Ama tarihler birbirine çok yakın (veya hatalar çok büyük); yakın bir yıldızda olabilecek yılda {}″'ye kadar bir "
+        "kayma dışlanamaz; hatta bir hareket belirtisi var ({}σ). Daha çok tarih ya da eski 2MASS / WISE fotoğrafları "
+        "(kenar çubuğu) bunu netleştirir.",
+    "But the dates are too close together (or the errors too big) to rule out a drift of up to {}″ per year, which a "
+    "nearby star could have. More dates, or the older 2MASS / WISE photos (sidebar), settle it.":
+        "Ama tarihler birbirine çok yakın (veya hatalar çok büyük); yakın bir yıldızda olabilecek yılda {}″'ye kadar bir "
+        "kayma dışlanamaz. Daha çok tarih ya da eski 2MASS / WISE fotoğrafları (kenar çubuğu) bunu netleştirir.",
+    "But the positions scatter {}× more than the measuring error, and not along one path: they are probably on "
+    "different objects.":
+        "Ama konumlar ölçüm hatasından {} kat fazla ve tek bir yol boyunca olmadan saçılıyor: büyük olasılıkla farklı "
+        "cisimler üzerindeler.",
+    "It moved: {}σ, far more than the measuring error.": "Hareket etti: {}σ, ölçüm hatasından çok daha fazla.",
+    "It moved {} within {}. No star moves measurably in days (the fastest, Barnard's Star, drifts {}″ per day).":
+        "{} içinde {} hareket etti. Hiçbir yıldız günler içinde ölçülebilir biçimde hareket etmez (en hızlısı Barnard "
+        "Yıldızı günde {}″ kayar).".replace("{} içinde {}", "{1} içinde {0}").replace("{}″ kayar", "{2}″ kayar"),
+    "{}″ per year is faster than any star (the fastest, Barnard's Star, moves {}″ per year).":
+        "Yılda {}″ her yıldızdan hızlıdır (en hızlısı Barnard Yıldızı yılda {}″ hareket eder).",
+    "An asteroid crosses a field this size in hours to days, so marks {} apart are probably on two different objects.":
+        "Bir asteroit bu büyüklükteki bir alanı saatler ile günler içinde geçer, bu yüzden {} arayla yapılmış işaretler "
+        "büyük olasılıkla iki farklı cisim üzerindedir.",
+    "Steady drift of {}″ per year: typical of a nearby star or brown dwarf.":
+        "Yılda {}″ düzgün kayma: yakın bir yıldız veya kahverengi cüce için tipik.",
+    "An asteroid would have left this patch of sky within days, yet it is still here after {}.":
+        "Bir asteroit bu gökyüzü parçasını günler içinde terk ederdi, oysa {} sonra hâlâ burada.",
+    "It shows the yearly parallax wobble (π = {} ± {}″), so it is close: about {} parsecs ({} light-years).":
+        "Yıllık paralaks salınımı gösteriyor (π = {} ± {}″), yani yakın: yaklaşık {} parsek ({} ışık yılı).",
+    "The path curves within weeks, as an orbit seen from the moving Earth does.":
+        "Yol haftalar içinde eğriliyor; hareket eden Dünya'dan görülen bir yörünge gibi.",
+    "The path bends, which a star's steady drift does not do.": "Yol bükülüyor; bir yıldızın düzgün kayması bunu yapmaz.",
+    "The positions do not lie on one path: the scatter is {}× the measuring error.":
+        "Konumlar tek bir yol üzerinde değil: saçılma ölçüm hatasının {} katı.",
+    "All {} positions lie on one path within the errors (χ²ν = {}).":
+        "{} konumun hepsi hatalar içinde tek bir yol üzerinde (χ²ν = {}).",
+    "Mark {} is {}″ ({}σ) from where the other marks put it: leave it out and try again, or check it on its photo.":
+        "{} işareti, diğer işaretlerin koyduğu yerden {}″ ({}σ) uzakta: çıkarıp yeniden deneyin ya da fotoğrafında "
+        "denetleyin.",
+    "It is near the ecliptic (latitude {}°), where most asteroids are.":
+        "Ekliptiğe yakın (enlem {}°); asteroitlerin çoğu burada.",
+    "It is far from the ecliptic (latitude {}°), where asteroids are rare.":
+        "Ekliptikten uzak (enlem {}°); burada asteroitler seyrektir.",
+    "No Gaia star at the marks: not a catalogued star (very cold brown dwarfs, asteroids and faint galaxies are "
+    "missing from Gaia).":
+        "İşaretlerde Gaia yıldızı yok: kataloglanmış bir yıldız değil (çok soğuk kahverengi cüceler, asteroitler ve "
+        "sönük gökadalar Gaia'da yoktur).",
+    "A Gaia DR3 star (G = {}) sits at the marks: a catalogued star, not an asteroid.":
+        "İşaretlerde bir Gaia DR3 yıldızı (G = {}) var: kataloglanmış bir yıldız, asteroit değil.",
+    "{} is in the catalogue ({}): a catalogued star, not an asteroid.":
+        "{} katalogda var ({}): kataloglanmış bir yıldız, asteroit değil.",
+    "{} gives its proper motion as {}″ per year.": "{} öz hareketini yılda {}″ olarak veriyor.",
+    "{} gives it almost no motion ({}″ per year).": "{} ona neredeyse hiç hareket vermiyor (yılda {}″).",
+    "The catalogue": "Katalog",
+    "{} hours": "{} saat", "{} days": "{} gün", "{} years": "{} yıl",
+    "{}″ per hour": "saatte {}″", "{}″ per year": "yılda {}″",
+    "On the photo of mark {}, something {}% as bright still sits where mark {} was: the marks may be on two different "
+    "objects.":
+        "{} işaretinin fotoğrafında, {} işaretinin olduğu yerde hâlâ %{} parlaklıkta bir şey duruyor: işaretler iki "
+        "farklı cisim üzerinde olabilir.".replace("{} işaretinin fotoğrafında, {} işaretinin olduğu yerde hâlâ %{}",
+                                                  "{0} işaretinin fotoğrafında, {2} işaretinin olduğu yerde hâlâ %{1}"),
+    "The old spots are empty on the later photos: the object really left them.":
+        "Eski noktalar sonraki fotoğraflarda boş: cisim gerçekten oradan ayrılmış.",
+    "Mark {} is seen in only {}% of the single exposures behind its photo: a cosmic-ray hit or hot pixel, or "
+    "something that moved during the exposures.":
+        "{} işareti, fotoğrafının arkasındaki tek pozların yalnızca %{} kadarında görülüyor: bir kozmik ışın çarpması "
+        "veya sıcak piksel ya da pozlar sırasında hareket eden bir şey.",
+    "Its brightness changed: {}× brighter on {} than on {} ({}σ, allowing 20% for the different colours each photo "
+    "averages). A variable star, a flare, or a different object.":
+        "Parlaklığı değişti: {1}'de {2}'ye göre {0} kat daha parlak ({3}σ; her fotoğrafın farklı renkleri ortalaması "
+        "için %20 pay bırakılarak). Değişen bir yıldız, bir parlama ya da farklı bir cisim.",
+})
+
 GLOSSARY_TR = """
 - **RA, Dec** (sağ açıklık, dik açıklık): gökyüzünde bir konum; Dünya'daki boylam ve enlem gibi, derece (°)
   cinsinden. RA 0–360, Dec −90 (güney kutbu) ile +90 (kuzey kutbu) arasında değişir.
@@ -589,8 +846,18 @@ def _one_key(key: str) -> str | None:
     for rx, tr_t in _TEMPLATES:
         m = rx.match(key)
         if m:
-            return _fill(tr_t, [TR[g.strip()] if g.strip() in TR else g for g in m.groups()])
+            return _fill(tr_t, [_group(g) for g in m.groups()])
     return None
+
+
+def _group(g: str) -> str:
+    """A value caught by a template: translated when it is itself known ('349 days', 'north'), else as it is.
+    Each value is shorter than the text it came from, so this always ends."""
+    k = g.strip()
+    if not k or k[0].isdigit() and " " not in k:
+        return g
+    out = _one_key(k)
+    return g if out is None else g.replace(k, out)
 
 
 _BULLET = re.compile(r"^(\s*(?:[-*]|\d+\.)\s+)(.*)$", re.S)

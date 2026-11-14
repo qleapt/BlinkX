@@ -14,11 +14,10 @@ bulk-downloaded, and new SPHEREx data appear automatically as the archive is upd
 | View | What it shows |
 |---|---|
 | **Blink epochs** | One averaged image per survey pass (epoch), aligned north-up, played as an animation. Older **2MASS (~2000)** and **WISE (2010)** images come first, so fast movers jump visibly. |
-| **Add** | All epochs averaged: the deepest image. |
 | **Subtract (B − A)** | Newer minus older epoch. A moving star leaves a light/dark pair; a variable star turns light or dark. |
 | **Every exposure** | Single exposures ordered by time or by wavelength (for asteroids and comets, which move within hours). |
 | **Spectrum & light curve** | Brightness in all six bands (0.75–5 µm) against wavelength, coloured by epoch, and against time. A plain-language "what changed?" summary. |
-| **Motion check** | Where the target's light is centred in each frame, against the track predicted from its catalogue (Gaia) proper motion and parallax, with a verdict. |
+| **Motion check** | Where the target's light is centred in each frame, against the track predicted from its catalogue (Gaia) proper motion and parallax. Then the motion engine fits all positions together (still / drift / drift + parallax / curved), estimates what kind of object it is with the evidence listed, and predicts the path for the coming years with an uncertainty cone. |
 
 All image views draw in one **sky viewer** in the browser: brightness, contrast and stretch change instantly
 (the page receives the pixel values, not pictures), zoom with the wheel, drag to move, a timeline with the real
@@ -28,9 +27,11 @@ hover for brightness, motion and distance; off until you tick them) and flagged 
 
 **You find things; the tools measure them.** Nothing is pointed out by default. Mark what you see (it snaps to
 the star's centre): the viewer gives positions, distances, directions and speed between dates, a card with that
-spot on every date and its brightness, and real sizes from a distance. **Check my find** matches a mark to the
-nearest Gaia star on the mark's date and runs the motion check on it, or shows its spectrum; with no Gaia match it
-says so and shows SPHEREx's own measurement. Optional **helpers**, off until switched on: star detection, and
+spot on every date and its brightness, and real sizes from a distance. **Check my find** analyses *all* the marks
+of one object together (`spx/motion.py`): each is measured on its own photo, one path is fitted through all of them,
+every pair is compared and every mark is tested against the others (leave-one-out), Gaia is checked at each mark's
+date, and the object is classified (standing still, moving star, asteroid / comet, or not one object) with the
+reasons. The path is predicted years ahead (hours for an asteroid), on the sky and against time, with a table. Optional **helpers**, off until switched on: star detection, and
 *Find what changed* (moved / brightened / faded, strongest first, allowing for all stars brightening together).
 Each view can be downloaded (GIF, CSV).
 
@@ -60,7 +61,7 @@ The app is ready for [Streamlit Community Cloud](https://streamlit.io/cloud): on
 | `ra`, `dec` | position in degrees (instead of `target`) | `?ra=269.452&dec=4.693` |
 | `fov` | field of view in arcmin: 3, 5, 10, 15 | `&fov=10` |
 | `band` | SPHEREx band D1 … D6 | `&band=D6` |
-| `mode` | `blink`, `add`, `sub`, `movie`, `spectrum`, `motion` | `&mode=sub` |
+| `mode` | `blink`, `sub`, `movie`, `spectrum`, `motion` | `&mode=sub` |
 | `gaia`, `old` | `0` skips loading Gaia stars / older surveys | `&old=0` |
 | `lang` | page language: `en` (English) or `tr` (Türkçe); also in the sidebar | `&lang=tr` |
 
@@ -129,12 +130,13 @@ spx/config.py       endpoints, tables, bands, flags, limits
 spx/targets.py      name / coordinate lookup, presets, proper motion and parallax
 spx/archive.py      TAP search, epoch grouping, thinning
 spx/cutouts.py      throttled partial-stream download, FITS parsing, wavelength, cache
-spx/stack.py        background removal, reprojection, stacks, add / subtract, survey frames
+spx/stack.py        background removal, reprojection, stacks, subtract, survey frames
 spx/photometry.py   aperture photometry, centroids, motion fit
 spx/catalogs.py     Gaia DR3 (Gaia archive, VizieR fallback), WISE 2010 and 2MASS frames
 spx/render.py       stretches, charts (spectrum, light curve, motion, miss distance), GIF export
 spx/viewer/         the sky viewer: pixel values packed into PNGs, two-way component (frontend/index.html)
 spx/detect.py       optional helpers: star detection, what changed between two dates
+spx/motion.py       motion engine: joint fit of N positions, model choice, leave-one-out, classification, prediction
 spx/warp.py         loading screen (canvas star field)
 tests/              pytest on synthetic data
 ```
