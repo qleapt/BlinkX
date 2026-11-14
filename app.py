@@ -14,7 +14,7 @@ st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="
 PRESET_BAND = {"Barnard's Star": "D4", "Epsilon Indi B": "D6", "WISE 0855-0714": "D6",
                "RW Aurigae": "D3", "R Draconis": "D3"}
 MODES = {"blink": "Blink epochs", "add": "Add (all epochs)", "sub": "Subtract (B − A)", "movie": "Every exposure",
-         "spectrum": "Spectrum & light curve"}
+         "spectrum": "Spectrum & light curve", "motion": "Motion check"}
 BAND_LABEL = {b: f"{b} · {lo:.2f}–{hi:.2f} µm" for b, (lo, hi, _) in config.BANDS.items()}
 
 qp = st.query_params
@@ -242,7 +242,7 @@ def survey(ra, dec, b, size):
     return catalogs.survey_frames(ra, dec, b, size)
 
 
-if ss.survey and ss.mode in ("blink", "sub") and frames:
+if ss.survey and ss.mode in ("blink", "sub", "motion") and frames:
     try:
         with st.spinner("Fetching older WISE / 2MASS images…"):
             items = survey(round(ra0, 5), round(dec0, 5), band, ss.fov * 1.45)
@@ -286,6 +286,74 @@ def gaia_mark(mjd):
 def marks_for(mjd):
     return [target_mark(mjd)] + ([gaia_mark(mjd)] if ss.gaia and gaia_stars else [])
 
+
+def sky_offset(px, py):
+    r, d = wgrid.pixel_to_world_values(px, py)
+    de = ((r - ra0 + 180) % 360 - 180) * np.cos(np.radians(dec0)) * 3600
+    return float(de), float((d - dec0) * 3600)
+
+
+if ss.mode == "motion":
+    st.subheader(f"Motion check: {tgt.name} in {band}")
+    pts = []
+    for f in frames:
+        r, d = targets.position_at(tgt, f.mjd_mid)
+        par = targets.predicted_offsets(tgt, [f.mjd_mid], config.REFERENCE_MJD)[0] - \
+            targets.predicted_offsets(tgt, [f.mjd_mid], config.REFERENCE_MJD, with_parallax=False)[0]
+        gx, gy = wgrid.world_to_pixel_values(r, d)
+        gx, gy = float(gx) - par[0] / arcsec_px, float(gy) + par[1] / arcsec_px  # east is -x
+        cx, cy = photometry.centroid(f.image, gx, gy, r=4)
+        if not np.isfinite(cx):
+            continue
+        de, dn = sky_offset(cx, cy)
+        err = 0.6 * (1 if f.kind == "survey" else 2)
+        if f.kind == "stack" and len(f.stamps) >= 3:  # scatter of single-exposure centroids
+            singles = [photometry.centroid(by_uri[s.uri].image, cx, cy, r=4) for s in f.stamps if s.uri in by_uri]
+            singles = np.array([sky_offset(*c) for c in singles if np.isfinite(c[0])])
+            if len(singles) >= 3:
+                err = max(0.3, float(np.hypot(*singles.std(axis=0)) / np.sqrt(len(singles))))
+        pe, pn = targets.predicted_offsets(tgt, [f.mjd_mid], config.REFERENCE_MJD)[0]
+        k = int(f.label.split(":")[0].split()[-1]) if f.label.startswith("Epoch") else 0
+        pts.append(dict(label=f.label.split(" · ")[0] if k == 0 else f"Epoch {k}", epoch=k, mjd=f.mjd_mid,
+                        date=targets.mjd_to_date(f.mjd_mid), de=de, dn=dn, err=err,
+                        off=float(np.hypot(de - pe, dn - pn)), par_e=par[0], par_n=par[1]))
+    if len(pts) < 2:
+        st.info("Need the target in at least two frames. Try a band where it is bright, or a larger field of view.")
+        st.stop()
+    m_lo, m_hi = min(p["mjd"] for p in pts) - 60, max(p["mjd"] for p in pts) + 60
+    grid_mjd = np.linspace(m_lo, m_hi, int(min(2000, max(200, (m_hi - m_lo) / 3))))
+    tr = targets.predicted_offsets(tgt, grid_mjd, config.REFERENCE_MJD)
+    st.plotly_chart(render.motion_fig(tr[:, 0], tr[:, 1], pts), use_container_width=True)
+    yrs = [(p["mjd"] - config.REFERENCE_MJD) / 365.25 for p in pts]
+    fit = photometry.fit_motion(yrs, [p["de"] - p["par_e"] for p in pts], [p["dn"] - p["par_n"] for p in pts],
+                                [p["err"] for p in pts])
+    cat_e, cat_n = tgt.pmra / 1000, tgt.pmdec / 1000
+    if fit:
+        pe, pn, ee, _ = fit
+        mu, cat_mu = np.hypot(pe, pn), np.hypot(cat_e, cat_n)
+        diff = np.hypot(pe - cat_e, pn - cat_n)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Measured motion", f"{mu:.2f} ± {ee:.2f} ″/yr")
+        c2.metric("Catalogue motion", f"{cat_mu:.2f} ″/yr", help=tgt.source)
+        c3.metric("Difference", f"{diff:.2f} ″/yr", f"{diff / ee:.1f} σ", delta_color="off")
+        if tgt.has_motion:
+            verdict = (f"✅ **Agrees** with the catalogue: SPHEREx sees {tgt.name} move {mu:.2f}″ per year, "
+                       f"the catalogue says {cat_mu:.2f}″." if diff < 3 * ee + 0.1 * cat_mu else
+                       f"⚠ **Differs** from the catalogue by {diff:.2f}″/yr ({diff / ee:.1f}σ). Saturation, a "
+                       "blended neighbour or too few epochs can cause this; check the blink.")
+        else:
+            verdict = (f"🚀 **Moves**: {mu:.2f} ± {ee:.2f}″/yr, more than 3× the uncertainty." if mu > 3 * ee else
+                       f"No motion detected: less than about {3 * ee:.2f}″/yr (3σ).")
+        st.markdown(verdict)
+    st.caption("Each point is where the target's light is centred in one frame (east to the left, as on the sky), "
+               "relative to its catalogue position on 2026-01-01. The grey line is where it should be: proper "
+               "motion plus the yearly parallax wobble seen from Earth. SPHEREx pixels are 6.15″; centring on many "
+               "pixels lets us measure shifts well below one pixel. Error bars come from the spread of single "
+               "exposures. Saturated stars and blended neighbours make centres less reliable.")
+    st.dataframe(pd.DataFrame([{k: (round(v, 2) if isinstance(v, float) else v) for k, v in p.items()
+                                if k not in ("epoch", "par_e", "par_n")} for p in pts]),
+                 hide_index=True, use_container_width=True)
+    st.stop()
 
 tab_view, tab_exp = st.tabs(["Blink", "Exposures"])
 with tab_view:

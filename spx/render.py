@@ -183,6 +183,30 @@ def lightcurve_fig(rows_by_epoch: dict, band: str, logy: bool = False):
     return _chart_layout(fig, "Date", f"{band} flux (mJy)", height=340, logy=logy)
 
 
+def motion_fig(track_e, track_n, pts):
+    """Sky-plane path: predicted track (line) and measured positions (points with error bars).
+    East is to the left, as on the sky."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=track_e, y=track_n, mode="lines", name="predicted (proper motion + parallax)",
+                             line=dict(color=INK2, width=2), hoverinfo="skip"))
+    for p in pts:
+        col = epoch_color(p["epoch"]) if p["epoch"] else INK2
+        fig.add_trace(go.Scatter(
+            x=[p["de"]], y=[p["dn"]], mode="markers", name=p["label"],
+            marker=dict(size=11, color=col, symbol="circle" if p["epoch"] else "diamond",
+                        line=dict(width=2, color="#1a1a19")),
+            error_x=dict(type="data", array=[p["err"]], color=col, thickness=1.2, width=0),
+            error_y=dict(type="data", array=[p["err"]], color=col, thickness=1.2, width=0),
+            customdata=[[p["date"], p["err"], p["off"]]],
+            hovertemplate=(f"{p['label']}<br>east %{{x:.1f}}″, north %{{y:.1f}}″ ± %{{customdata[1]:.1f}}″<br>"
+                           "%{customdata[2]:.1f}″ from prediction<extra></extra>")))
+    _chart_layout(fig, "East offset (″, east is left)", "North offset (″)", height=520)
+    fig.update_xaxes(autorange="reversed")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_layout(legend=dict(orientation="v", y=1, x=1.02, yanchor="top"))
+    return fig
+
+
 def _rgb(z: np.ndarray, diverging: bool) -> np.ndarray:
     z = np.nan_to_num(z, nan=0.0)
     if diverging:

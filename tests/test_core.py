@@ -179,6 +179,15 @@ def test_gaia_propagation_and_subtract_pair():
     assert dif[3, 2] == 10 and dif[1, 2] == -10
 
 
+def test_motion_fit_recovers_proper_motion():
+    from spx import photometry
+    yrs = np.array([-0.4, 0.0, 0.5, -16.0])
+    de, dn = -0.8 * yrs + 0.05, 10.36 * yrs - 0.1
+    pe, pn, ee, en = photometry.fit_motion(yrs, de, dn, [0.5, 0.5, 0.5, 0.6])
+    assert pe == pytest.approx(-0.8, abs=0.01) and pn == pytest.approx(10.36, abs=0.01) and ee > 0
+    assert photometry.fit_motion([0.0], [0], [0], [1]) is None
+
+
 def test_masked_pixels_are_ignored():
     w, shape = stack.grid(150.0, 10.0, 3)
     good = stack.align(_stamp(0), w, shape)
