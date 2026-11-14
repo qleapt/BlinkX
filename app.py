@@ -11,7 +11,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from astropy.time import Time
 
-from spx import archive, catalogs, config, cutouts, photometry, render, stack, targets, viewer, warp
+from spx import archive, catalogs, config, cutouts, detect, photometry, render, stack, targets, viewer, warp
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="wide")
 
@@ -493,13 +493,14 @@ COORD_NOTE = ("📍 You typed a sky position, so nothing is followed here (the o
               "Look for anything that moves or changes yourself, then **📍 Mark** it on two dates to measure it.")
 
 
-def sky_viewer(shown_frames, diverging=False, key_extra=""):
-    """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts)."""
+def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None):
+    """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts).
+    stars / changes: results of the optional helpers (None while they are switched off)."""
     cx, cy = (float(v) - 1 for v in wgrid.wcs.crpix)
     data = viewer.payload(shown_frames, target=[target_at(f.mjd_mid) for f in shown_frames],
                           gaia=[gaia_on(f.mjd_mid) for f in shown_frames], scale=arcsec_px, center=(cx, cy),
                           radec=(ra0, dec0), diverging=diverging, mode=ss.mode,
-                          title=f"{tgt.name}|{band}|{ss.fov}|{key_extra}")
+                          title=f"{tgt.name}|{band}|{ss.fov}|{key_extra}", stars=stars, changes=changes)
     store = f"{tgt.name}|{ss.fov}|{band}|{key_extra}"
     first_sphx = len(shown_frames) - len(sphx_frames) if len(shown_frames) == len(frames) else 0
     res = viewer.show(data, key=f"viewer|{ss.mode}", store_key=store,
@@ -688,8 +689,73 @@ with tab_view:
         al = archive.evenly(al, config.MOVIE_CAP)
         shown = [stack.single_frame(a, i + 1) for i, a in enumerate(al)]
 
-    sky_viewer(shown, diverging, key_extra=mode)
+    # Optional helpers, off until switched on (the user finds things; the tools measure them). Their
+    # switches sit below the viewer; their values are known here already, so the viewer can draw results.
+    ss.setdefault("h_sigma", 5.0)
+    labels = [f.label.split(" · ")[0] for f in frames]
+    h_stars, h_change = ss.get("h_stars", False), ss.get("h_change", False) and mode in ("blink", "sub")
+    if mode == "sub" and len(frames) >= 2:
+        pair = (ia, ib)
+    else:
+        for k_, d_ in (("h_a", len(frames) - len(sphx_frames)), ("h_b", len(frames) - 1)):
+            if not 0 <= ss.get(k_, -1) < len(frames):
+                ss[k_] = max(0, d_)
+        pair = (ss.h_a, ss.h_b)
+    found = [detect.find_stars(f.image, ss.h_sigma) for f in shown] if h_stars else None
+    changed = []
+    if h_change and len(frames) >= 2 and pair[0] != pair[1]:
+        changed = detect.changes(frames[pair[0]].image, frames[pair[1]].image, ss.h_sigma)[:40]
+        yrs = abs(frames[pair[1]].mjd_mid - frames[pair[0]].mjd_mid) / 365.25
+        for i, c in enumerate(changed):
+            c["label"] = f"C{i + 1}"
+            if c["kind"] == "moved":  # in arcseconds, and per year, like the marking tool
+                arc = c["dist_px"] * arcsec_px
+                c["text"] = (f"moved {arc:.1f}″ toward the {detect.COMPASS[int(round(c['pa_deg'] / 45)) % 8]}"
+                             + (f" ({arc / yrs:.1f}″ per year)" if yrs > 0.05 else ""))
+    sky_viewer(shown, diverging, key_extra=mode, stars=found, changes=changed)
     pending_notes()
+
+    with st.expander("🧰 Helpers — off until you switch them on", expanded=bool(h_stars or h_change)):
+        st.caption("The app does not point things out by itself: look first, then let a helper check what you saw.")
+        h1, h2, h3 = st.columns(3)
+        h1.toggle("Detect stars", key="h_stars",
+                  help="Finds spots well above the noise on each photo and draws small green crosses on them. "
+                       "Faint or crowded stars can be missed: one SPHEREx pixel is 6.15″ wide.")
+        if mode in ("blink", "sub"):
+            h2.toggle("Find what changed", key="h_change",
+                      help="Compares two dates and lists stars that moved, brightened or faded, strongest first. "
+                           "Labels C1, C2… appear on the image.")
+        h3.slider("Detection threshold (σ)", 3.0, 10.0, key="h_sigma", step=0.5,
+                  help="How far above the noise a spot must be. Higher = fewer but surer detections. "
+                       "σ (sigma) is the noise level of the photo.")
+        if h_stars and found:
+            st.caption(f"Detected stars: {', '.join(f'{len(s)}' for s in found)} (per photo, above {ss.h_sigma:g}σ).")
+        if h_change:
+            if mode == "blink":
+                p1, p2 = st.columns(2)
+                p1.selectbox("Compare from (older)", range(len(frames)), key="h_a", format_func=lambda i: labels[i],
+                             help="The 'before' photo for Find what changed.")
+                p2.selectbox("…to (newer)", range(len(frames)), key="h_b", format_func=lambda i: labels[i],
+                             help="The 'after' photo.")
+            if any(frames[i].kind == "survey" for i in pair):
+                st.caption("⚠ One photo is from an older survey (another telescope, scaled for display): only "
+                           "*moved* results mean something; brightness changes between telescopes do not.")
+            if changed:
+                rows = []
+                for c in changed:
+                    r1, d1 = wgrid.pixel_to_world_values(c["x"], c["y"])
+                    rows.append({"label": c["label"], "what": c["kind"], "details": c["text"],
+                                 "RA (°)": round(float(r1), 5), "Dec (°)": round(float(d1), 5),
+                                 "strength (σ)": round(c["score"], 1)})
+                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
+                             column_config={"strength (σ)": st.column_config.NumberColumn(
+                                 help="How many noise levels the change is; above ~5 it is very likely real")})
+                st.caption(f"{labels[pair[0]]} → {labels[pair[1]]}. Check each one by eye: rings around very bright "
+                           "stars and stars at the edge can be false alarms.")
+            elif pair[0] == pair[1]:
+                st.info("Pick two different photos to compare.")
+            else:
+                st.info(f"No change above {ss.h_sigma:g}σ between {labels[pair[0]]} and {labels[pair[1]]}.")
 
     c1, c2, c3 = st.columns([2, 2, 3])
     if not load_all and n_band > len(todo):

@@ -270,3 +270,51 @@ def test_viewer_payload_has_overlays_per_frame():
                           radec=(10.0, 20.0))
     assert len(data["frames"]) == 3 and data["frames"][1]["date"] == "2026-05-20"
     assert data["frames"][0]["target"]["x"] == 2
+
+
+# --- helpers: star detection and change finding ---------------------------------
+def _sky(stars, n=81, noise=0.05, seed=3):
+    """Synthetic background-subtracted frame: gaussian stars (x, y, peak) on noise."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.indices((n, n))
+    img = rng.normal(0, noise, (n, n))
+    for x, y, peak in stars:
+        img += peak * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 1.6 ** 2))
+    return img
+
+
+def test_detect_finds_injected_stars_and_no_noise_peaks():
+    from spx import detect
+    stars = [(20.3, 30.7, 2.0), (60.0, 15.2, 1.0), (45.6, 62.1, 0.6)]
+    found = detect.find_stars(_sky(stars), nsigma=5)
+    assert len(found) == 3
+    for x, y, _ in stars:
+        assert min(np.hypot(f["x"] - x, f["y"] - y) for f in found) < 0.3
+    assert detect.find_stars(_sky([]), nsigma=5) == []
+
+
+def test_changes_classifies_moved_brightened_faded():
+    from spx import detect
+    still, mover, flare, gone = (15.0, 15.0, 1.5), (40.0, 40.0, 1.5), (65.0, 20.0, 0.8), (20.0, 65.0, 1.2)
+    a = _sky([still, mover, flare, gone], seed=1)
+    b = _sky([still, (43.0, 41.0, 1.5), (65.0, 20.0, 2.0)], seed=2)
+    ch = detect.changes(a, b, nsigma=5)
+    kinds = {c["kind"]: c for c in ch}
+    assert set(kinds) == {"moved", "brightened", "faded"}, ch
+    m = kinds["moved"]
+    assert abs(m["x"] - 40) < 0.5 and abs(m["x2"] - 43) < 0.5 and abs(m["dist_px"] - np.hypot(3, 1)) < 0.4
+    assert abs(kinds["brightened"]["x"] - 65) < 0.5 and abs(kinds["faded"]["y"] - 65) < 0.5
+    assert ch == sorted(ch, key=lambda c: -c["score"])  # ranked, strongest first
+
+
+def test_changes_ignore_a_shift_shared_by_all_stars():
+    """Each epoch averages a different mix of wavelengths, so all stars can look ~30% brighter at once.
+    Only the star that changed more than the others counts."""
+    from spx import detect
+    pos = [(12 + 13 * (i % 5), 12 + 15 * (i // 5), 0.6 + 0.15 * i) for i in range(15)]
+    a = _sky(pos, seed=4)
+    b_stars = [(x, y, p * 1.3) for x, y, p in pos]
+    b_stars[7] = (pos[7][0], pos[7][1], pos[7][2] * 3.0)   # the real flare
+    ch = detect.changes(a, _sky(b_stars, seed=5), nsigma=5)
+    assert len(ch) == 1 and ch[0]["kind"] == "brightened", ch
+    assert abs(ch[0]["x"] - pos[7][0]) < 0.5 and abs(ch[0]["y"] - pos[7][1]) < 0.5

@@ -71,6 +71,8 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
   <label class="ck" title="Blue circles: stars in ESA's Gaia catalogue, moved to each date. Hover one for details"><input type="checkbox" id="oGaia"> Gaia stars</label>
   <label class="ck" title="Pink: pixels the NASA pipeline marked as unreliable (overexposed, cosmic rays…)"><input type="checkbox" id="oFlag"> Flagged pixels</label>
   <label class="ck" title="Your markers and lines"><input type="checkbox" id="oMine" checked> My marks</label>
+  <label class="ck" id="lStars" style="display:none" title="Green crosses: stars the star-detection helper found on this photo (Snap puts your mark on their centre)"><input type="checkbox" id="oStars" checked> Detected stars</label>
+  <label class="ck" id="lChg" style="display:none" title="What the 'Find what changed' helper found: magenta arrow = moved, red ring = brightened, blue ring = faded. Hover one for details"><input type="checkbox" id="oChg" checked> Changes</label>
   <label class="ck" title="Moves your click to the light-weighted centre of the nearest bright spot, so marks land on the middle of a star"><input type="checkbox" id="snap" checked> Snap to star centre</label>
 </div>
 <div class="wrap">
@@ -112,15 +114,20 @@ if (window.ResizeObserver) new ResizeObserver(setHeight).observe(document.body);
 
 const $ = id => document.getElementById(id);
 const c1 = $("c1"), c2 = $("c2"), g1 = c1.getContext("2d"), g2 = c2.getContext("2d");
-let D = null, SIG = "", KEY = "", N = 0, vals = [], flg = [], ready = [], renders = [], diffC = null, diffKey = "";
+let D = null, SIG = "", OVS = "", KEY = "", N = 0, vals = [], flg = [], ready = [], renders = [], diffC = null, diffKey = "";
 let cur = 0, A = 0, B = 0, tool = "mark", marks = [], lines = [], pending = null, hover = null, timer = null;
 let view = {z: 1, vx: 0, vy: 0}, swipeX = 0.5, fadeFrom = -1, fadeT0 = 0, sample = null, ver = 0, sendT = null;
 
 // ---------- data ----------
 function onRender(args) {
   const d = args.data; if (!d || !d.frames || !d.frames.length) return;
-  const sig = [d.nx, d.ny, d.mode, d.title, d.frames.length, d.frames.map(f => f.png.length + ":" + f.mjd + ":" + (f.gaia || []).length).join(",")].join("|");
-  if (sig === SIG) return;                                   // same photos: keep zoom, frame and marks as they are
+  const sig = [d.nx, d.ny, d.mode, d.title, d.frames.length, d.frames.map(f => f.png.length + ":" + f.png.slice(-24) + ":" + f.mjd).join(",")].join("|");
+  if (sig === SIG) {                                         // same photos: keep zoom, frame and marks; refresh overlays only
+    const ov = JSON.stringify([d.changes || [], d.frames.map(f => [(f.gaia || []).length, (f.stars || []).length])]);
+    if (ov !== OVS) { OVS = ov; D = d; helperControls(); draw(); }
+    return;
+  }
+  OVS = JSON.stringify([d.changes || [], d.frames.map(f => [(f.gaia || []).length, (f.stars || []).length])]);
   const sameGrid = D && D.nx === d.nx && D.ny === d.ny;
   SIG = sig; D = d; N = d.frames.length; KEY = "spx-measure:" + (args.store_key || "");
   vals = new Array(N); flg = new Array(N); ready = new Array(N).fill(false); renders = new Array(N); diffC = null; diffKey = ""; sample = null;
@@ -136,7 +143,11 @@ function onRender(args) {
     o.value = i; o.textContent = f.date + " · " + f.label.split(" · ")[0].slice(0, 28); el.appendChild(o); }); el.value = k ? B : A; });
   loadMarks();
   D.frames.forEach((f, i) => { const im = new Image(); im.onload = () => decode(i, im); im.src = "data:image/png;base64," + f.png; });
-  buildTimeline(); fit(); panel();
+  buildTimeline(); helperControls(); fit(); panel();
+}
+function helperControls() {   // the helper overlays appear only once the user has switched a helper on
+  const hasStars = D.frames.some(f => f.stars && f.stars.length), hasChg = !!(D.changes && D.changes.length);
+  $("lStars").style.display = hasStars ? "inline-flex" : "none"; $("lChg").style.display = hasChg ? "inline-flex" : "none";
 }
 function decode(i, im) {
   const c = document.createElement("canvas"); c.width = D.nx; c.height = D.ny;
@@ -241,6 +252,15 @@ function overlays(g, cv, i, diverging) {
   g.lineWidth = 2; g.font = "bold 12px system-ui";
   if ($("oGaia").checked && fr.gaia) { g.strokeStyle = "rgba(56,208,255,.85)"; g.lineWidth = 1.5;
     fr.gaia.forEach(s => { const p = toScr(cv, s); g.beginPath(); g.arc(p.x, p.y, Math.max(5, 1.6 * k), 0, 7); g.stroke(); }); g.lineWidth = 2; }
+  if ($("oStars").checked && fr.stars) { g.strokeStyle = "rgba(90,209,154,.9)"; g.lineWidth = 1.5; g.beginPath();
+    fr.stars.forEach(s => { const p = toScr(cv, s); g.moveTo(p.x - 5, p.y); g.lineTo(p.x + 5, p.y); g.moveTo(p.x, p.y - 5); g.lineTo(p.x, p.y + 5); }); g.stroke(); g.lineWidth = 2; }
+  if ($("oChg").checked && D.changes) D.changes.forEach(c => {
+    const col = c.kind === "moved" ? "#ff6bd6" : c.kind === "brightened" ? "#ff5a5a" : "#6aa8ff", p = toScr(cv, c), q = toScr(cv, {x: c.x2, y: c.y2}), r = Math.max(8, 3 * k);
+    g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2; g.beginPath();
+    if (c.kind === "moved") { g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); const a = Math.atan2(q.y - p.y, q.x - p.x);
+      g.moveTo(q.x, q.y); g.lineTo(q.x - 7 * Math.cos(a - 0.5), q.y - 7 * Math.sin(a - 0.5)); g.moveTo(q.x, q.y); g.lineTo(q.x - 7 * Math.cos(a + 0.5), q.y - 7 * Math.sin(a + 0.5)); }
+    else g.arc(p.x, p.y, r, 0, 7);
+    g.stroke(); g.font = "bold 11px system-ui"; g.fillText(c.label, (c.kind === "moved" ? q.x : p.x) + r * 0.8, (c.kind === "moved" ? q.y : p.y) + r + 4); });
   if ($("oTgt").checked && fr.target) { const t = fr.target, p = toScr(cv, t); g.strokeStyle = "rgba(255,176,0,.9)"; g.beginPath();
     if (t.cross) { const r = 10; g.moveTo(p.x - r, p.y); g.lineTo(p.x - 4, p.y); g.moveTo(p.x + 4, p.y); g.lineTo(p.x + r, p.y);
       g.moveTo(p.x, p.y - r); g.lineTo(p.x, p.y - 4); g.moveTo(p.x, p.y + 4); g.lineTo(p.x, p.y + r); }
@@ -399,7 +419,7 @@ $("speed").oninput = () => { if (timer) start(); };
 $("tMark").onclick = () => setTool("mark"); $("tRuler").onclick = () => setTool("ruler"); $("tLook").onclick = () => setTool("look");
 $("cmp").onchange = () => { stop(); fit(); }; $("selA").onchange = e => { A = +e.target.value; draw(); }; $("selB").onchange = e => { B = +e.target.value; draw(); };
 ["stretch", "blk", "wht", "oFlag"].forEach(id => $(id).addEventListener("input", () => { ver++; draw(); thumbs(); }));
-["oTgt", "oGaia", "oMine"].forEach(id => $(id).addEventListener("input", draw));
+["oTgt", "oGaia", "oMine", "oStars", "oChg"].forEach(id => $(id).addEventListener("input", draw));
 $("zreset").onclick = () => { view = {z: 1, vx: (D.nx - 1) / 2, vy: (D.ny - 1) / 2}; draw(); };
 $("undo").onclick = () => { if (pending) pending = null; else { const lm = marks.length ? marks[marks.length - 1].t || 0 : -1, ll = lines.length ? lines[lines.length - 1].t || 0 : -1;
   if (ll > lm) lines.pop(); else marks.pop(); } changed(); };
@@ -440,6 +460,8 @@ function readout(cv, ev) {
     + " · " + Math.abs(s.e).toFixed(1) + "″ " + (s.e >= 0 ? "E" : "W") + ", " + Math.abs(s.n).toFixed(1) + "″ " + (s.n >= 0 ? "N" : "S") + " of centre";
   const fr = D.frames[i < 0 ? B : i], H = $("hov"), q = toScr(cv, hover); let best = null, bd = 8;
   if ($("oGaia").checked && fr.gaia) fr.gaia.forEach(g => { const p = toScr(cv, g), d = Math.hypot(p.x - q.x, p.y - q.y); if (d < bd) { bd = d; best = g; } });
+  if (!best && $("oChg").checked && D.changes) D.changes.forEach(c => { const p = toScr(cv, c.kind === "moved" ? {x: c.x2, y: c.y2} : c), d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < 12 && !best) best = {text: c.label + ": " + c.text}; });
   if (!best && $("oTgt").checked && fr.target) { const p = toScr(cv, fr.target); if (Math.hypot(p.x - q.x, p.y - q.y) < 12) best = {text: fr.target.label}; }
   if (best) { const st = $("stage").getBoundingClientRect(); H.innerHTML = esc(best.text || "").replace(/&lt;br&gt;/g, "<br>"); H.style.display = "block";
     H.style.left = Math.min(ev.clientX - st.left + 14, st.width - 200) + "px"; H.style.top = (ev.clientY - st.top + 14) + "px"; } else H.style.display = "none";

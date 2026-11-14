@@ -48,9 +48,10 @@ def encode_frames(images, flag_masks=None) -> dict:
 
 
 def payload(frames, target=None, gaia=None, scale: float = 3.075, center=(0.0, 0.0), radec=(0.0, 0.0),
-            diverging: bool = False, title: str = "", mode: str = "blink") -> dict:
-    """frames: stack.Frame list. target / gaia: one entry per frame (dict x, y, label / list of dicts
-    x, y, text) in grid pixels, or None. center: grid pixel of (ra0, dec0) = radec."""
+            diverging: bool = False, title: str = "", mode: str = "blink", stars=None, changes=None) -> dict:
+    """frames: stack.Frame list. target / gaia / stars: one entry per frame (dict x, y, label / list of
+    dicts x, y, text / list of dicts x, y) in grid pixels, or None. changes: helper results (dicts x, y,
+    x2, y2, kind, label, text). center: grid pixel of (ra0, dec0) = radec."""
     enc = encode_frames([f.image for f in frames], [getattr(f, "flag_mask", None) for f in frames])
     ny, nx = frames[0].image.shape
     out = []
@@ -58,10 +59,13 @@ def payload(frames, target=None, gaia=None, scale: float = 3.075, center=(0.0, 0
         out.append(dict(png=enc["frames"][i], label=f.label, mjd=float(f.mjd_mid),
                         date=targets.mjd_to_date(f.mjd_mid), kind=getattr(f, "kind", ""),
                         flags=list(getattr(f, "flags", []) or []),
-                        target=target[i] if target else None, gaia=gaia[i] if gaia else []))
+                        target=target[i] if target else None, gaia=gaia[i] if gaia else [],
+                        stars=[dict(x=round(s["x"], 2), y=round(s["y"], 2)) for s in stars[i]] if stars else []))
+    keep = ("x", "y", "x2", "y2", "kind", "label", "text")
     return dict(frames=out, nx=nx, ny=ny, lo=enc["lo"], s=enc["s"], a=enc["a"], scale=scale,
                 cx=float(center[0]), cy=float(center[1]), ra0=float(radec[0]), dec0=float(radec[1]),
-                diverging=diverging, title=title, mode=mode)
+                diverging=diverging, title=title, mode=mode,
+                changes=[{k: c[k] for k in keep if k in c} for c in (changes or [])])
 
 
 def show(data: dict, key: str, store_key: str, height: int = 640, settings: dict | None = None):
