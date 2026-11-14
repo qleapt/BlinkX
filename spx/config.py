@@ -83,6 +83,7 @@ SPEC_QUICK_PER_BAND = 12    # spectrum quick look: exposures per band (all six b
 SPEC_CAP_PER_BAND = 40      # spectrum "Load all"
 FOV_CHOICES = (3, 5, 10, 15)  # arcmin
 TAP_CACHE_HOURS = 12
+SIA_CACHE_HOURS = 12        # fast exposure list; the complete TAP list replaces it when ready
 REFERENCE_MJD = 61041.0     # 2026-01-01: cutouts are centred on the target at this date
 CACHE_VERSION = 1           # bump to invalidate processed stamps
 

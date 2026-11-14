@@ -206,3 +206,67 @@ def test_parse_coords_many_spellings():
     for name in ["M 42", "HD 209458", "Andromeda", "2MASS J0523-1403"]:
         assert targets.parse_coords(name) is None and not targets.looks_like_coords(name), name
     assert targets.looks_like_coords("400 10")  # out of range: a bad position, not a SIMBAD name
+
+
+def test_race_remembers_the_faster_source():
+    """When the IRSA copy wins a race, the next download asks both at once (no hedge wait)."""
+    import time as _t
+    from spx import cutouts
+
+    route = cutouts.Route()
+
+    def slow_s3():
+        _t.sleep(0.6)
+        return "s3"
+
+    def fast_irsa():
+        return "irsa"
+    assert cutouts.race(slow_s3, fast_irsa, hedge_after=0.2, route=route) == "irsa"
+    assert route.prefer_irsa
+    t0 = _t.time()
+    assert cutouts.race(slow_s3, fast_irsa, hedge_after=0.5, route=route) == "irsa"
+    assert _t.time() - t0 < 0.3  # did not wait for the hedge
+    # a fast AWS answer resets the preference
+    route2 = cutouts.Route()
+    assert cutouts.race(lambda: "s3", fast_irsa, hedge_after=0.5, route=route2) == "s3"
+    assert not route2.prefer_irsa
+
+
+# --- viewer --------------------------------------------------------------------
+def _decode_png16(b64, lo, s, a):
+    """Python twin of the viewer's JavaScript decoder."""
+    import base64
+    from PIL import Image
+    rgb = np.asarray(Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")).astype(int)[::-1]
+    q = rgb[..., 0] * 256 + rgb[..., 1]
+    v = lo + s * np.sinh((q - 1) / 65534 * a)
+    return np.where(q == 0, np.nan, v), rgb[..., 2] > 127
+
+
+def test_viewer_encoding_keeps_faint_and_bright_values():
+    from spx import viewer
+    rng = np.random.default_rng(1)
+    img = rng.normal(0, 0.05, (41, 41))
+    img[20, 20] = 400.0            # a bright star
+    img[3, 3] = np.nan             # no data
+    flags = np.zeros_like(img, bool)
+    flags[10, 12] = True
+    enc = viewer.encode_frames([img], [flags])
+    v, f = _decode_png16(enc["frames"][0], enc["lo"], enc["s"], enc["a"])
+    assert np.isnan(v[3, 3])
+    ok = np.isfinite(img)
+    faint = ok & (np.abs(img) < 0.3)
+    assert np.max(np.abs(v[faint] - img[faint])) < 0.01   # well below the noise (0.05)
+    assert abs(v[20, 20] - 400) / 400 < 0.01
+    assert f[10, 12] and f.sum() == 1
+
+
+def test_viewer_payload_has_overlays_per_frame():
+    from spx import viewer
+    from types import SimpleNamespace
+    fr = [SimpleNamespace(image=np.zeros((5, 5)), flag_mask=None, label=f"Epoch {i}", mjd_mid=61000.0 + 180 * i,
+                          kind="stack") for i in range(3)]
+    data = viewer.payload(fr, target=[dict(x=2, y=2, label="t")] * 3, scale=3.075, center=(2, 2),
+                          radec=(10.0, 20.0))
+    assert len(data["frames"]) == 3 and data["frames"][1]["date"] == "2026-05-20"
+    assert data["frames"][0]["target"]["x"] == 2

@@ -1,4 +1,4 @@
-"""Stretch, colour maps, Plotly animation and GIF export."""
+"""Stretch, Plotly charts (spectrum, light curve, motion) and GIF export."""
 from __future__ import annotations
 
 import io
@@ -33,99 +33,6 @@ def stretch(img: np.ndarray, lo: float, hi: float, kind: str = "asinh", divergin
     if kind == "log":
         return np.log10(1 + 99 * x) / 2
     return x
-
-
-GRAY = [[0, "#000000"], [1, "#ffffff"]]
-DIVERGING = [[0, "#2166ac"], [0.25, "#67a9cf"], [0.5, "#f7f7f7"], [0.75, "#ef8a62"], [1, "#b2182b"]]
-# Subtract view: the colour bar spells out what each colour means.
-DIFF_COLORBAR = dict(tickvals=[-1, 0, 1], ticktext=["Fainter now<br>(was here before)", "No change",
-                                                      "Brighter now<br>(new / arrived)"],
-                     thickness=14, len=0.75, x=1.0, xpad=6, outlinewidth=0, tickfont=dict(size=11, color="#e6e6e6"))
-
-
-def _marks_traces(marks):
-    """marks: list of dicts {x, y, name, symbol, color, size, text}. One scatter per mark kind."""
-    out = []
-    for m in marks:
-        out.append(go.Scatter(
-            x=m.get("x", []), y=m.get("y", []), mode="markers", name=m["name"],
-            marker=dict(symbol=m.get("symbol", "circle-open"), size=m.get("size", 18),
-                        color=m.get("color", "#ffb000"), line=dict(width=2, color=m.get("color", "#ffb000"))),
-            text=m.get("text"), hovertemplate="%{text}<extra></extra>" if m.get("text") is not None else None,
-            hoverinfo=None if m.get("text") is not None else "skip", showlegend=True))
-    return out
-
-
-FLAG_COLOR = "rgba(255,40,120,0.45)"
-
-
-def animation(frames, kind: str = "asinh", marks_per_frame=None, diverging: bool = False,
-              arcsec_per_px: float = 3.075, duration_ms: int = 700, height: int = 640,
-              show_flags: bool = False):
-    lo, hi = limits(frames, diverging)
-    ny, nx = frames[0].image.shape
-    marks_per_frame = marks_per_frame or [[] for _ in frames]
-
-    def data(i):
-        f = frames[i]
-        z = stretch(f.image, lo, hi, kind, diverging)
-        heat = go.Heatmap(z=z, customdata=f.image, colorscale=DIVERGING if diverging else GRAY,
-                          zmin=-1 if diverging else 0, zmax=1, showscale=diverging,
-                          colorbar=DIFF_COLORBAR if diverging else None,
-                          hovertemplate=("x %{x}, y %{y}<br>newer − older: %{customdata:+.3g} MJy/sr<br>"
-                                         "(red = brighter now, blue = was brighter before)<extra></extra>"
-                                         if diverging else
-                                         "x %{x}, y %{y}<br>%{customdata:.4g} MJy/sr (sky brightness)<extra></extra>"))
-        out = [heat]
-        if show_flags:  # always one trace per frame so the animation stays consistent
-            m = f.flag_mask if f.flag_mask is not None else np.zeros_like(f.image, bool)
-            out.append(go.Heatmap(z=np.where(m, 1.0, np.nan), colorscale=[[0, FLAG_COLOR], [1, FLAG_COLOR]],
-                                  showscale=False, hoverinfo="skip", name="flagged pixels"))
-        return out + _marks_traces(marks_per_frame[i])
-
-    def title(i):
-        f = frames[i]
-        warn = f"  ⚠ flags at target: {', '.join(f.flags)}" if f.flags else ""
-        return f"{f.label}{warn}"
-
-    fig = go.Figure(data=data(0), frames=[go.Frame(data=data(i), name=str(i), layout=go.Layout(title_text=title(i)))
-                                          for i in range(len(frames))])
-    bar_px = 60 / arcsec_per_px
-    x0, y0 = nx * 0.05, ny * 0.05
-    ink = "#222222" if diverging else "#ffffff"  # the subtract view has a white background
-    fig.update_layout(
-        title=dict(text=title(0), font=dict(size=14), x=0.01),
-        height=height, margin=dict(l=10, r=10, t=40, b=10), paper_bgcolor="#0e1117", plot_bgcolor="#111111",
-        font=dict(color="#e6e6e6"),
-        xaxis=dict(visible=False, range=[-0.5, nx - 0.5], constrain="domain"),
-        yaxis=dict(visible=False, range=[-0.5, ny - 0.5], scaleanchor="x", constrain="domain"),
-        legend=dict(orientation="h", y=-0.02, x=0, font=dict(size=11), bgcolor="rgba(0,0,0,0)"),
-        shapes=[dict(type="line", x0=x0, x1=x0 + bar_px, y0=y0, y1=y0, line=dict(color=ink, width=3))],
-        annotations=[
-            dict(x=x0 + bar_px / 2, y=y0 + ny * 0.03, text="1′", showarrow=False, font=dict(color=ink)),
-            dict(x=nx * 0.93, y=ny * 0.93, ax=0, ay=40, text="N", showarrow=True, arrowcolor=ink,
-                 font=dict(color=ink), arrowhead=2, xref="x", yref="y", axref="pixel", ayref="pixel"),
-            dict(x=nx * 0.83, y=ny * 0.80, ax=40, ay=0, text="E", showarrow=True, arrowcolor=ink,
-                 font=dict(color=ink), arrowhead=2, xref="x", yref="y", axref="pixel", ayref="pixel"),
-        ],
-    )
-    if len(frames) > 1:
-        fig.update_layout(
-            updatemenus=[dict(type="buttons", direction="left", x=0, y=1.0, xanchor="left", yanchor="bottom",
-                              pad=dict(t=0, r=8), showactive=False, buttons=[
-                    dict(label="▶ Play", method="animate",
-                         args=[None, dict(frame=dict(duration=duration_ms, redraw=True), fromcurrent=True,
-                                          transition=dict(duration=0), mode="immediate")]),
-                    dict(label="❚❚ Pause", method="animate",
-                         args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
-            sliders=[dict(active=0, y=0, x=0.12, len=0.88, pad=dict(t=30), currentvalue=dict(visible=False),
-                          steps=[dict(method="animate", label=str(i + 1),
-                                      args=[[str(i)], dict(frame=dict(duration=0, redraw=True), mode="immediate")])
-                                 for i in range(len(frames))])])
-        fig.layout.updatemenus[0].x = 0
-        fig.layout.updatemenus[0].y = -0.02
-        fig.layout.updatemenus[0].yanchor = "top"
-    return fig
 
 
 # --- charts (dataviz: validated dark categorical order, fixed per epoch, never cycled) -------

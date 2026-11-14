@@ -11,15 +11,15 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from astropy.time import Time
 
-import streamlit.components.v1 as components
-
-from spx import archive, catalogs, config, cutouts, measure, photometry, render, stack, targets
+from spx import archive, catalogs, config, cutouts, photometry, render, stack, targets, viewer, warp
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", page_icon="🔭", layout="wide")
 
 PRESET_BAND = targets.PRESET_BAND
 MODES = {"blink": "Blink epochs", "add": "Add", "sub": "Subtract", "movie": "Every exposure",
          "spectrum": "Spectrum & light curve", "motion": "Motion check"}
+MODE_LABEL = {"blink": "▶ Blink", "add": "➕ Add", "sub": "➖ Subtract", "movie": "🎞 Every exposure",
+              "spectrum": "🌈 Spectrum", "motion": "🧭 Motion check"}
 MODE_HELP = {"blink": "flip between dates: movers jump", "add": "stack all dates: see faint things",
              "sub": "newer − older: see only what changed", "movie": "one frame per single photo",
              "spectrum": "brightness at each infrared colour", "motion": "does it move as predicted?"}
@@ -113,11 +113,7 @@ with st.sidebar:
     for i, name in enumerate(targets.PRESETS):
         cols[i % 2].button(name, on_click=_pick, args=(name,), use_container_width=True,
                            help=PRESET_HELP.get(name))
-    st.markdown("**② How to look**")
-    st.radio("View (what to show)", list(MODES), key="mode", format_func=MODES.get,
-             captions=[MODE_HELP[m] for m in MODES],
-             help="Blink is the classic way to spot moving or changing objects. The others are tools to "
-                  "see faint things, see only what changed, or measure colour, brightness and motion.")
+    st.markdown("**② Colour and size**")
     st.selectbox("Band (which infrared colour)", list(config.BANDS), key="band", format_func=BAND_LABEL.get,
                  help="SPHEREx splits infrared light into six bands: D1 has the shortest wavelengths "
                       "(just beyond red light), D6 the longest (sees cool dust and cold brown dwarfs). "
@@ -127,22 +123,17 @@ with st.sidebar:
              help="Width of the picture in arcminutes (′). 60′ = 1°; the full Moon is about 30′ wide. "
                   "Bigger fields take a little longer to load.")
     st.markdown("**③ Extras**")
-    st.toggle("Show Gaia stars (blue circles)", key="gaia",
-              help="Marks the stars catalogued by ESA's Gaia satellite, each moved to where it should be on "
-                   "that date. Hover a circle for its details.")
+    st.toggle("Load the Gaia star list", key="gaia",
+              help="Fetches the stars catalogued by ESA's Gaia satellite. They stay hidden until you tick "
+                   "*Gaia stars* in the viewer; then each is drawn as a blue circle where it should be on that "
+                   "date. Hover a circle for its details.")
     st.toggle("Include older photos (2MASS ~2000, WISE 2010)", key="survey",
               help="Adds images from earlier infrared surveys before the SPHEREx frames, so motion over 15–25 "
                    "years becomes visible. Other telescopes: J → D1/D2, Ks → D3, W1 → D4, W2 → D5/D6.")
-    st.toggle("Show flagged pixels (pink)", key="showflags",
-              help="Pink: the value shown comes from pixels the NASA pipeline marked as unreliable "
-                   "(overexposed, cosmic-ray hits…). Treat what is under them with care.")
-    with st.expander("Display settings"):
-        st.selectbox("Stretch (how faint things are brightened)", render.STRETCHES, key="stretch",
-                     help="asinh and log bring out faint things without burning out bright stars; "
-                          "linear shows brightness as it is.")
-        st.slider("Frame time (ms per image when playing)", 200, 2000, key="speed", step=100)
+    st.caption("Brightness, contrast, speed and flagged pixels are set in the viewer itself.")
     with st.expander("📖 Words used here"):
         st.markdown(GLOSSARY)
+    st.html(warp.SCRIPT, unsafe_allow_javascript=True)  # loading animation, installed once per page
 
 
 # write the state back to the URL so it can be shared
@@ -167,72 +158,56 @@ def search(ra, dec):  # cached on disk by archive.search (fast list first, compl
     return archive.search(ra, dec)
 
 
-# Loading screen: a "warp" flight through a star field, in the middle of the page where the images will
-# appear. Pure CSS (Streamlit markdown runs no scripts); negative delays keep the flight continuous when
-# the text on it changes.
-_rng = np.random.default_rng(7)
-WARP_STARS = "".join(
-    f'<span class="r" style="transform:rotate({a:.0f}deg)"><i style="animation-delay:-{d:.2f}s;'
-    f'animation-duration:{t:.2f}s;height:{h:.1f}px;background:linear-gradient(90deg,rgba(0,0,0,0),{c})"></i></span>'
-    for a, d, t, h, c in zip(_rng.uniform(0, 360, 110), _rng.uniform(0, 2.4, 110), _rng.uniform(1.1, 2.4, 110),
-                              _rng.uniform(1.0, 2.6, 110),
-                              _rng.choice(["#dfe9ff", "#ffffff", "#bcd4ff", "#ffe2b0", "#9fd8ff"], 110)))
-WARP = """<style>
-.spx-warp{position:relative;height:460px;margin:8px 0 6px;border-radius:16px;overflow:hidden;border:1px solid #23283a;
-  background:radial-gradient(ellipse at center,#14204a 0%,#070b1a 45%,#020308 80%)}
-.spx-warp .r{position:absolute;left:50%;top:42%;width:0;height:0}
-.spx-warp .r i{position:absolute;left:0;top:0;width:46px;border-radius:2px;opacity:0;transform-origin:left center;
-  animation:spx-fly 1.8s cubic-bezier(.55,0,1,.45) infinite}
-@keyframes spx-fly{0%{transform:translateX(8px) scaleX(.04);opacity:0}12%{opacity:.9}
-  100%{transform:translateX(620px) scaleX(2.2);opacity:1}}
-.spx-warp .core{position:absolute;left:50%;top:42%;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;
-  background:radial-gradient(circle,#9fc2ff55 0%,#4a6cff22 40%,transparent 70%);animation:spx-pulse 2.4s ease-in-out infinite}
-@keyframes spx-pulse{50%{transform:scale(1.25);opacity:.6}}
-.spx-card{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:min(580px,92%);padding:14px 18px;
-  border-radius:12px;background:rgba(10,13,22,.8);border:1px solid #2c3346;backdrop-filter:blur(4px);text-align:center}
-.spx-card h4{margin:0 0 4px;padding:0;font-size:1.05rem;color:#eef1f7}
-.spx-card p{margin:0;color:#a7afc0;font-size:.88rem}
-.spx-steps{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:.8rem;color:#6f7890}
-.spx-steps .done{color:#5ad19a}.spx-steps .now{color:#ffcf66;font-weight:600}
-@media (prefers-reduced-motion: reduce){.spx-warp .r i,.spx-warp .core{animation:none;opacity:.8;transform:translateX(90px) scaleX(.15)}}
-</style><div class="spx-warp" role="status" aria-live="polite"><div class="core"></div>%STARS%
-<div class="spx-card"><h4>%TITLE%</h4><p>%DETAIL%</p><div class="spx-steps">%STEPS%</div></div></div>"""
-STAGES = ["Find target", "Search NASA archive", "Download photos", "Line up & average"]
-
-
 class Loader:
+    """The star-field loading screen (spx/warp.py) with the current step, in the middle of the page."""
+
     def __init__(self):
-        self.box, self.bar, self.t0 = st.empty(), st.empty(), time.time()
+        self.box, self.t0 = st.empty(), time.time()
+        self.title, self.detail, self.stage, self.frac, self.ptext = "", "", 0, None, ""
+
+    def _draw(self):
+        self.box.markdown(warp.card(self.title, self.detail, self.stage, self.frac, self.ptext),
+                          unsafe_allow_html=True)
 
     def step(self, title, detail="", stage=0):
-        steps = "".join(f'<span class="{"done" if i < stage else "now" if i == stage else ""}">'
-                        f'{"✓" if i < stage else "●" if i == stage else "○"} {s}</span>'
-                        for i, s in enumerate(STAGES))
-        self.box.markdown(WARP.replace("%STARS%", WARP_STARS).replace("%TITLE%", title)
-                          .replace("%DETAIL%", detail).replace("%STEPS%", steps), unsafe_allow_html=True)
+        if stage != self.stage:
+            self.frac, self.ptext = None, ""
+        self.title, self.detail, self.stage = title, detail, stage
+        self._draw()
 
     def progress(self, frac, text):
-        self.bar.progress(min(1.0, frac), text)
+        self.frac, self.ptext = min(1.0, frac), text
+        self._draw()
 
-    def done(self):
+    def done(self, arrive=True):
+        secs = time.time() - self.t0
+        if arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out before the photos
+            self.stage = 4
+            self._draw()
+            time.sleep(0.45)
         self.box.empty()
-        self.bar.empty()
-        return time.time() - self.t0
+        return secs
 
 
 st.title("SPHEREx Blink Viewer")
-st.caption("NASA's SPHEREx space telescope photographs the whole sky every six months in 102 infrared colours. "
-           "Flip between its photos of one spot and anything that moves or changes brightness stands out.")
+st.caption("SPHEREx photographs the whole sky every six months in 102 infrared colours. "
+           "Flip between its photos of one spot: whatever moves or changes brightness stands out.")
+st.segmented_control("View", list(MODES), key="mode", required=True, format_func=MODE_LABEL.get,
+                     label_visibility="collapsed",
+                     help="How to look at the photos:\n\n" + "\n".join(f"- **{MODE_LABEL[m]}**: {MODE_HELP[m]}"
+                                                                       for m in MODES))
+st.caption(f"**{MODE_LABEL[ss.mode]}**: {MODE_HELP[ss.mode]}")
 with st.expander("❓ How to use this page (30 seconds)"):
     st.markdown(
         "1. **Choose a target** in the sidebar: a challenge target, any name (e.g. *M 42*), or a sky position "
         "in degrees (e.g. `269.452 4.693`). Press **🔍 Go**.\n"
         "2. **Press ▶ Play** under the image. The photos are months apart: a star that *jumps* is moving, one "
         "that *flickers* changes brightness.\n"
-        "3. **Switch the view** in the sidebar: *Subtract* shows only what changed, *Spectrum* shows colour, "
-        "*Motion check* compares the measured path with the predicted one.\n"
-        "4. **📍 Mark & measure** (tab above the image): click to mark objects, draw lines to measure sizes and "
-        "distances, and mark the same object on two dates to get its speed.\n\n"
+        "3. **Switch the view** with the buttons above: *Subtract* shows only what changed, *Spectrum* shows "
+        "colour, *Motion check* compares the measured path with the predicted one.\n"
+        "4. **📍 Mark** (in the viewer's toolbar): click to mark objects, draw lines to measure sizes and "
+        "distances, and mark the same object on two dates to get its speed. *Compare* puts two dates side "
+        "by side, under a swipe divider, or subtracts them.\n\n"
         "Hover over the small ❔ icons for short explanations; *📖 Words used here* in the sidebar explains "
         "the astronomy terms.")
 load = Loader()
@@ -240,7 +215,7 @@ load.step("Finding your target…", "Reading the position you typed, or looking 
 try:
     tgt = resolve(ss.target_text)
 except targets.TargetNotFound:
-    load.done()
+    load.done(arrive=False)
     if targets.looks_like_coords(ss.target_text):
         st.error(f"**{ss.target_text}** is not a valid sky position. Use two numbers in degrees: RA from 0 to 360, "
                  "then Dec from −90 to +90, for example `269.452 4.693` or `269.452, -4.693`.")
@@ -249,7 +224,7 @@ except targets.TargetNotFound:
                  "name (e.g. *M 42*, *HD 209458*), or type a position like `269.452 4.693`.")
     st.stop()
 except Exception as e:  # SIMBAD down
-    load.done()
+    load.done(arrive=False)
     st.error(f"Name lookup failed ({e}). Coordinates like `269.452 4.693` always work.")
     st.stop()
 
@@ -268,11 +243,11 @@ load.step("Asking NASA's archive which photos cover this spot…",
 try:
     exps = search(round(ra0, 4), round(dec0, 4))
 except archive.ArchiveBusy:
-    load.done()
+    load.done(arrive=False)
     st.warning("The NASA/IPAC archive is busy right now. Please try again in a minute.")
     st.stop()
 if not exps:
-    load.done()
+    load.done(arrive=False)
     st.info(f"SPHEREx has no images covering {tgt.name} yet. New data arrive weekly.")
     st.stop()
 
@@ -293,7 +268,7 @@ def fetch(todo, label, group_of=None):
                                     deadline=config.FETCH_SOFT_DEADLINE if group_of else None,
                                     enough=enough, stats=stats)
     if not out:
-        load.done()
+        load.done(arrive=False)
         st.warning("No photos could be downloaded (the archive or your connection is busy). "
                    "Please try again in a minute.")
         st.stop()
@@ -423,18 +398,38 @@ stamps = fetch(todo, band, {e.uri: k for k, g in groups.items() for e in g})
 
 wgrid, shape = stack.grid(ra0, dec0, ss.fov)
 arcsec_px = config.PIXEL_SCALE_ARCSEC / config.OVERSAMPLE
-by_uri = {}
-for s in stamps:
-    a = stack.align(s, wgrid, shape)
-    a.bad_near_target = stack.flags_near(s, *targets.position_at(tgt, s.mjd))
-    by_uri[s.uri] = a
 
-frames = []
-for k, g in groups.items():
-    items = [by_uri[e.uri] for e in g if e.uri in by_uri]
-    if items:
-        frames.append(stack.stack_frame(items, f"Epoch {k}: "))
+
+@st.cache_resource(max_entries=4, show_spinner=False)
+def aligned_frames(key, _stamps, _groups, _tgt):
+    """Line every photo up on the grid and average each epoch. Kept in memory, so changing a display
+    control or the view never lines the photos up again. key: target, field, band, photos."""
+    by_uri = {}
+    for s in _stamps:
+        a = stack.align(s, wgrid, shape)
+        a.bad_near_target = stack.flags_near(s, *targets.position_at(_tgt, s.mjd))
+        by_uri[s.uri] = a
+    frames = []
+    for k, g in _groups.items():
+        items = [by_uri[e.uri] for e in g if e.uri in by_uri]
+        if items:
+            frames.append(stack.stack_frame(items, f"Epoch {k}: "))
+    return by_uri, frames
+
+
+by_uri, frames = aligned_frames(
+    (tgt.name, round(ra0, 6), round(dec0, 6), ss.fov, band,
+     tuple((k, tuple(sorted(e.uri for e in g))) for k, g in groups.items()), tuple(sorted(s.uri for s in stamps))),
+    stamps, groups, tgt)
+frames = list(frames)
 sphx_frames = list(frames)
+
+
+@st.cache_resource(max_entries=4, show_spinner=False)
+def old_survey_frames(key, _items, ref):
+    """WISE / 2MASS frames on the same grid (kept in memory like aligned_frames)."""
+    return sorted([f for f in (stack.survey_frame(it, wgrid, shape, ref, band) for it in _items) if f is not None],
+                  key=lambda f: f.mjd_start)
 
 
 survey_pending = False
@@ -447,21 +442,21 @@ if fut_survey is not None and frames:
         except FutureTimeout:
             items, survey_pending = [], True
         ref = float(np.nanmax([np.nanpercentile(f.image, 99.5) for f in sphx_frames]))
-        old = [stack.survey_frame(it, wgrid, shape, ref, band) for it in items]
-        frames = sorted([f for f in old if f is not None], key=lambda f: f.mjd_start) + frames
+        skey = (round(ra0, 6), round(dec0, 6), ss.fov, band,
+                tuple((it["survey"], it["band"], tuple(it["mjds"]), len(it["images"])) for it in items))
+        frames = list(old_survey_frames(skey, items, ref)) + frames
     except Exception as e:
         st.caption(f"Older survey images unavailable ({type(e).__name__}).")
 
 
-def target_mark(mjd):
+def target_at(mjd):
+    """Where the target is on that date, in grid pixels (a ring), or the typed position (a cross)."""
     if tgt.source == "coordinates":  # nothing to track: just mark the position that was asked for
         x, y = wgrid.world_to_pixel_values(tgt.ra, tgt.dec)
-        return dict(x=[float(x)], y=[float(y)], name="your position", symbol="cross-thin", color="#ffb000",
-                    size=16, text=[f"RA {tgt.ra:.5f}, Dec {tgt.dec:+.5f} (position you entered)"])
-    r, d = targets.position_at(tgt, mjd)
-    x, y = wgrid.world_to_pixel_values(r, d)
-    return dict(x=[float(x)], y=[float(y)], name="predicted position", symbol="circle-open",
-                color="#ffb000", size=22, text=[f"{tgt.name} predicted on {targets.mjd_to_date(mjd)}"])
+        return dict(x=float(x), y=float(y), cross=True,
+                    label=f"RA {tgt.ra:.5f}, Dec {tgt.dec:+.5f} (the position you typed)")
+    x, y = wgrid.world_to_pixel_values(*targets.position_at(tgt, mjd))
+    return dict(x=float(x), y=float(y), label=f"{tgt.name}: predicted position on {targets.mjd_to_date(mjd)}")
 
 
 gaia_stars, gaia_note, gaia_pending = [], "", False
@@ -477,15 +472,15 @@ if fut_gaia is not None:
 gaia_text = [catalogs.gaia_hover(s) for s in gaia_stars]
 
 
-def gaia_mark(mjd):
+def gaia_on(mjd):
+    """Gaia stars moved to that date, in grid pixels, with their hover text."""
+    if not gaia_stars:
+        return []
     r, d = catalogs.gaia_at(gaia_stars, mjd)
-    x, y = wgrid.world_to_pixel_values(r, d) if len(r) else ([], [])
-    return dict(x=list(np.atleast_1d(x)), y=list(np.atleast_1d(y)), name="Gaia DR3", symbol="circle-open",
-                color="#38d0ff", size=9, text=gaia_text)
-
-
-def marks_for(mjd):
-    return [target_mark(mjd)] + ([gaia_mark(mjd)] if ss.gaia and gaia_stars else [])
+    x, y = wgrid.world_to_pixel_values(r, d)
+    return [dict(x=round(float(a), 2), y=round(float(b), 2), text=t)
+            for a, b, t in zip(np.atleast_1d(x), np.atleast_1d(y), gaia_text)
+            if -2 < a < shape[1] + 1 and -2 < b < shape[0] + 1]
 
 
 def sky_offset(px, py):
@@ -494,24 +489,30 @@ def sky_offset(px, py):
     return float(de), float((d - dec0) * 3600)
 
 
-COORD_NOTE = ("📍 **You entered a sky position, not a named object**, so there is no catalogued star here to follow "
-              "(the small orange cross only marks the spot you typed). Use the **📍 Mark & measure** tool to mark "
-              "anything you see yourself: it measures distances and sizes, and if you mark the same object on two "
-              "dates it tells you how fast it moved.")
+COORD_NOTE = ("📍 You typed a sky position, so nothing is followed here (the orange cross marks the spot). "
+              "Look for anything that moves or changes yourself, then **📍 Mark** it on two dates to measure it.")
 
 
-def measure_tool(shown_frames, diverging=False, key_extra=""):
-    """The in-page marking / ruler tool on the given frames."""
-    tx, ty = wgrid.world_to_pixel_values(tgt.ra, tgt.dec) if tgt.source == "coordinates" else \
-        wgrid.world_to_pixel_values(*targets.position_at(tgt, shown_frames[-1].mjd_mid))
-    data = measure.payload(shown_frames, ss.stretch, diverging, wgrid, arcsec_px,
-                           target=dict(x=float(tx), y=float(ty)))
-    key = f"{tgt.name}|{ss.fov}|{band}|{key_extra}"
-    components.html(measure.html(data, key, height=560), height=700)
+def sky_viewer(shown_frames, diverging=False, key_extra=""):
+    """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts)."""
+    cx, cy = (float(v) - 1 for v in wgrid.wcs.crpix)
+    data = viewer.payload(shown_frames, target=[target_at(f.mjd_mid) for f in shown_frames],
+                          gaia=[gaia_on(f.mjd_mid) for f in shown_frames], scale=arcsec_px, center=(cx, cy),
+                          radec=(ra0, dec0), diverging=diverging, mode=ss.mode,
+                          title=f"{tgt.name}|{band}|{ss.fov}|{key_extra}")
+    store = f"{tgt.name}|{ss.fov}|{band}|{key_extra}"
+    first_sphx = len(shown_frames) - len(sphx_frames) if len(shown_frames) == len(frames) else 0
+    res = viewer.show(data, key=f"viewer|{ss.mode}", store_key=store,
+                      settings=dict(stretch=ss.stretch, speed=ss.speed, gaia=False, flags=ss.showflags,
+                                    a=first_sphx))
+    if isinstance(res, dict) and res.get("key") == "spx-measure:" + store:
+        ss["_marks"] = dict(res, store=store)
+    got = ss.get("_marks") or {}
+    return got.get("marks", []) if got.get("store") == store else []
 
 
 def pending_notes():
-    """Say so when part of the data is still arriving over a slow connection."""
+    """Say so when part of the data is still arriving over a slow connection; redraw when it has."""
     msgs = []
     if ss.get("_skipped"):
         msgs.append(f"{ss['_skipped']} more SPHEREx photos are still downloading (slow connection); each "
@@ -520,10 +521,23 @@ def pending_notes():
         msgs.append("the older WISE (2010) / 2MASS (~2000) photos are still downloading")
     if gaia_pending:
         msgs.append("the Gaia star list is still loading")
-    if msgs:
-        ci, cb = st.columns([5, 1])
-        ci.info("⏳ " + "; ".join(msgs) + ". They are saved as they arrive: press **Refresh** in a moment to add them.")
-        cb.button("🔄 Refresh", help="Redraw the view; everything that has arrived since is taken from the cache.")
+    if not msgs:
+        return
+    have = {s.uri for s in stamps}
+    missing = [e for e in todo if e.uri not in have] if ss.get("_skipped") else []
+    akey = f"_auto|{tgt.name}|{band}|{ss.fov}"
+    t_first = ss.setdefault(akey + "|t", time.time())
+
+    @st.fragment(run_every=3)
+    def watch():  # checks every 3 s; redraws the whole page once everything still missing has arrived
+        arrived = ((not survey_pending or fut_survey is None or fut_survey.done())
+                   and (not gaia_pending or fut_gaia is None or fut_gaia.done())
+                   and all(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in missing))
+        if arrived and ss.get(akey, 0) < 5 and time.time() - t_first < 600:
+            ss[akey] = ss.get(akey, 0) + 1
+            st.rerun()
+        st.info("⏳ " + "; ".join(msgs) + ". They are added here automatically as soon as they arrive.")
+    watch()
 
 
 if ss.mode == "motion":
@@ -532,10 +546,10 @@ if ss.mode == "motion":
         st.subheader(f"Motion check at {tgt.name} ({band})")
         st.info("A motion check compares where a **known object** is predicted to be with where SPHEREx sees it. "
                 "You typed a sky position, so there is no catalogued object (and no prediction) here.\n\n"
-                "**Do it by hand instead:** in the tool below, choose 📍 *Mark object*, click a star on the first "
-                "date, switch to a later date with ▶, and click the *same* star again. The panel shows how far it "
-                "moved and its speed in ″ per year. If you mark nothing, there is no marked object to measure.")
-        measure_tool(frames, key_extra="motion")
+                "**Do it by hand instead:** choose 📍 *Mark*, click a star on the first date, switch to a later "
+                "date with ▶ or the timeline, and click the *same* star again. The panel shows how far it moved "
+                "and its speed in ″ per year. If you mark nothing, there is no marked object to measure.")
+        sky_viewer(frames, key_extra="motion")
         pending_notes()
         st.caption(f"{len(stamps)} photos loaded in {load_secs:.1f} s. Stars move very little: anything below "
                    "about 3″ (half a SPHEREx pixel) between dates is within the measuring error.")
@@ -640,8 +654,8 @@ if ss.mode == "motion":
 
 load_secs = load.done()
 if tgt.source == "coordinates":
-    st.info(COORD_NOTE)
-tab_view, tab_mark, tab_exp = st.tabs(["▶ Blink", "📍 Mark & measure", "📋 Photo list"])
+    st.caption(COORD_NOTE)
+tab_view, tab_exp = st.tabs(["🔭 Sky viewer", "📋 Photo list"])
 with tab_view:
     mode = ss.mode
     diverging = False
@@ -660,19 +674,12 @@ with tab_view:
                           format_func=lambda i: labels[i], help="The 'after' picture. The view shows B − A.")
         shown = [stack.subtract(frames[ib], frames[ia])]
         diverging = True
-        st.markdown(
-            '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin:4px 0 2px;font-size:.92rem">'
-            '<span><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:#b2182b;'
-            'vertical-align:-2px"></span> <b>Red</b> = brighter now (in B)</span>'
-            '<span><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:#f7f7f7;'
-            'vertical-align:-2px"></span> <b>White / grey</b> = no change (steady stars cancel out)</span>'
-            '<span><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:#2166ac;'
-            'vertical-align:-2px"></span> <b>Blue</b> = was brighter before (in A)</span></div>',
-            unsafe_allow_html=True)
-        st.caption("How to read it: a **moving star** leaves a blue + red pair — blue where it *was*, red where it "
-                   "*is now*. A star that **changed brightness** leaves a single red (brightened) or blue (faded) "
-                   "spot. Small rings around very bright stars are leftovers of imperfect cancelling, not real "
-                   "changes. The stronger the colour, the bigger the change.")
+        with st.expander("How to read the colours"):
+            st.markdown("**Red** = brighter now (in B) · **white / grey** = no change (steady stars cancel out) · "
+                        "**blue** = was brighter before (in A).\n\nA **moving star** leaves a blue + red pair — blue "
+                        "where it *was*, red where it *is now*. A star that **changed brightness** leaves a single red "
+                        "(brightened) or blue (faded) spot. Small rings around very bright stars are leftovers of "
+                        "imperfect cancelling, not real changes. The stronger the colour, the bigger the change.")
     else:  # movie
         order = st.radio("Order", ["time", "wavelength"], horizontal=True,
                          help="time: oldest to newest. wavelength: from the bluest to the reddest infrared "
@@ -681,9 +688,7 @@ with tab_view:
         al = archive.evenly(al, config.MOVIE_CAP)
         shown = [stack.single_frame(a, i + 1) for i, a in enumerate(al)]
 
-    marks = [marks_for(f.mjd_mid) for f in shown]
-    fig = render.animation(shown, ss.stretch, marks, diverging, arcsec_px, ss.speed, show_flags=ss.showflags)
-    st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+    sky_viewer(shown, diverging, key_extra=mode)
     pending_notes()
 
     c1, c2, c3 = st.columns([2, 2, 3])
@@ -692,7 +697,8 @@ with tab_view:
                   on_click=lambda: ss.__setitem__(load_key, True),
                   help="The quick look averages a few photos per date. Loading all gives a cleaner, deeper image "
                        "but takes longer.")
-    c2.download_button("Download GIF", render.to_gif(shown, ss.stretch, diverging, ss.speed),
+    _gif_args = (shown, ss.stretch, diverging, ss.speed)  # built only when the button is pressed
+    c2.download_button("Download GIF", lambda: render.to_gif(*_gif_args),
                        file_name=f"spherex_{tgt.name.replace(' ', '_')}_{band}_{mode}.gif", mime="image/gif",
                        help="Save the animation as a GIF to share.")
     with c3.expander("What am I looking at?"):
@@ -701,17 +707,12 @@ with tab_view:
             "*epoch* (one pass of the survey). North is up, east is left; the white bar is 1 arcminute (1′). "
             + ("The small orange cross marks the position you typed. "
                if tgt.source == "coordinates" else
-               "The orange circle is where the target should be on that date, from its catalogue proper motion. ")
+               "The orange ring is where the target should be on that date, from its catalogue proper motion. ")
             + "Blue circles are Gaia stars. A star that moves (like Barnard's Star) shifts against the "
-            "background; a variable star changes brightness. **Subtract** shows the change directly. Motion "
-            "between epochs is often smaller than one SPHEREx pixel (6.15″), so the image is shown 2× finer "
-            "than the camera's pixels.")
-
-with tab_mark:
-    st.caption("Click on the image to mark objects, or draw a line to measure a size or a distance on the sky. "
-               "Mark the same object on two dates to measure how fast it moves. Nothing is sent anywhere: it all "
-               "happens in your browser (your marks are remembered on this computer).")
-    measure_tool(shown, diverging, key_extra=ss.mode)
+            "background; a variable star changes brightness. *Compare* in the viewer puts two dates side by "
+            "side, under a swipe divider or subtracted. Motion between epochs is often smaller than one SPHEREx "
+            "pixel (6.15″), so the image is shown 2× finer than the camera's pixels. Your marks stay in your "
+            "browser (remembered on this computer).")
 
 with tab_exp:
     rows = [dict(date=targets.mjd_to_date(a.stamp.mjd), mjd=round(a.stamp.mjd, 4), band=a.stamp.band,

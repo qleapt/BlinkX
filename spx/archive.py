@@ -101,7 +101,7 @@ def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
     rows = None
     if use_cache and sia_path.exists():
         blob = json.loads(sia_path.read_text())
-        if time.time() - blob["t"] < 3600:
+        if time.time() - blob["t"] < config.SIA_CACHE_HOURS * 3600:
             rows = [Exposure(**e) for e in blob["rows"]]
     if rows is None:
         try:

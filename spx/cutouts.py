@@ -434,19 +434,37 @@ def _load(path) -> Stamp:
                  z["variance"], z["zodi"], m["header"], m["flag_bits"], m["wavelength"], m["bandwidth"])
 
 
-def _first_ok(futs):
-    """Result of whichever future succeeds first; raise only if all of them fail."""
-    pending, last = set(futs), None
+_HEDGE_POOL = ThreadPoolExecutor(48)
+
+
+class Route:
+    """Remembers which copy answered first lately (AWS or IRSA), so slow links stop waiting."""
+
+    def __init__(self):
+        self.prefer_irsa = False
+
+
+_ROUTE = Route()
+
+
+def race(s3, irsa, hedge_after: float = config.HEDGE_AFTER, route: Route = _ROUTE):
+    """Read from AWS; if it has not answered within hedge_after seconds, ask IRSA as well and keep
+    whichever arrives first. Once IRSA has won, ask both straight away until AWS wins again."""
+    fs = _HEDGE_POOL.submit(s3)
+    if not route.prefer_irsa:
+        wait([fs], timeout=hedge_after)
+        if fs.done() and fs.exception() is None:
+            return fs.result()
+    fi = _HEDGE_POOL.submit(irsa)
+    pending, last = {fs, fi}, None
     while pending:
         done, pending = wait(pending, return_when=FIRST_COMPLETED)
-        for f in done:
+        for f in sorted(done, key=lambda f: f is fi):
             if f.exception() is None:
+                route.prefer_irsa = f is fi
                 return f.result()
             last = f.exception()
     raise last
-
-
-_HEDGE_POOL = ThreadPoolExecutor(48)
 
 
 def get_stamp(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> Stamp:
@@ -463,13 +481,9 @@ def get_stamp(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> Stamp
         def irsa():
             return parse_stamp(fetch_prefix(url), exp, ra, dec, table)
         if config.USE_S3:
-            # Race: the AWS copy is fast on a good connection but reads whole detector rows (~10x the
-            # bytes); the IRSA cutout is small. If AWS has not answered within HEDGE_AFTER seconds,
-            # ask IRSA as well and keep whichever arrives first (slow or distant connections).
-            fs = _HEDGE_POOL.submit(fetch_s3_stamp, exp, ra, dec, size_arcmin, table)
-            wait([fs], timeout=config.HEDGE_AFTER)
-            futs = [fs] if fs.done() and fs.exception() is None else [fs, _HEDGE_POOL.submit(irsa)]
-            st = _first_ok(futs)
+            # The AWS copy is fast on a good connection but reads whole detector rows (~10x the
+            # bytes); the IRSA cutout is small. race() hedges between them and remembers the winner.
+            st = race(lambda: fetch_s3_stamp(exp, ra, dec, size_arcmin, table), irsa)
         else:
             st = irsa()
     else:  # first exposure of this detector: one full download, keep its wavelength table
