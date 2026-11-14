@@ -157,6 +157,23 @@ which still rises and falls with the star. It shows the trend, not a calibrated 
 Ideas: the closest star (Proxima Centauri) moves almost 4″ per year. Bright nebulae look different at
 1 µm and at 4 µm. Find a star that changed brightness between epochs.
 
+### Mark & measure (works everywhere, made for typed positions)
+
+A position you type (e.g. `201.365 -43.019`) has no catalogued star to follow, so there is no predicted
+path to check. Open the **📍 Mark & measure** tab above the picture (in **Motion check** it appears
+directly):
+
+- **📍 Mark object:** click anything to drop a numbered marker. With **Snap to star centre** on, the
+  marker jumps to the middle of the nearest star. The panel lists each marker's RA and Dec.
+- **Distances between marks:** the separation (″) and direction between consecutive markers. Mark the
+  *same* star on two dates (switch photos with ◀ ▶) and it also shows the **speed in ″ per year**.
+  Under ~3″ (half a pixel) is within the measuring error.
+- **📏 Measure (line):** click the start, then the end. The line's length on the sky is shown on the image.
+- **Real size:** type the object's distance (parsecs or light-years) to turn angles into AU and km
+  (size in AU = angle in ″ × distance in pc).
+- With no markers the panel says *No marked sky object*. **Undo** / **Clear all** remove marks;
+  **Download CSV** saves them. Marks stay on your computer only.
+
 ---
 
 ## 8. Share and save
@@ -187,7 +204,8 @@ Ideas: the closest star (Proxima Centauri) moves almost 4″ per year. Bright ne
 
 | Problem | What to do |
 |---|---|
-| First load takes 30–60 s | Normal: NASA's archive limits how fast one computer can download. The second time it is instant (cached). |
+| First load takes 30–60 s | Normal on a slow or distant connection. The app shows the picture once every epoch has a photo; the rest keep downloading, press **🔄 Refresh** to add them. The second time it is instant (cached). |
+| Coordinates are not recognised | Use two numbers in degrees, RA (0–360) then Dec (−90 to +90): `269.452 4.693`, `269.452°, +4.693°` and `RA=269.452 Dec=4.693` all work. The line under the box shows how your text was read. |
 | "The NASA/IPAC archive is busy" | Wait a minute and reload. |
 | "Could not find …" | Check the spelling, try another name (e.g. `HD 209100`), or type coordinates in degrees. |
 | "Name lookup failed" | The name service is down; coordinates always work. |

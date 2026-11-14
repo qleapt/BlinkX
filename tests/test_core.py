@@ -194,3 +194,15 @@ def test_masked_pixels_are_ignored():
     bad = stack.align(_stamp(0, bad=(slice(5, 10), slice(5, 10))), w, shape)
     s = stack.weighted_mean([good.image, bad.image], [good.weight, bad.weight])
     assert np.nanmax(s) < 200
+
+
+def test_parse_coords_many_spellings():
+    for text in ["269.452 4.693", "269.452, 4.693", "269.452° 4.693°", "RA=269.452 Dec=4.693",
+                 "ra 269.452 dec 4.693", "269.452d +4.693d"]:
+        t = targets.parse_coords(text)
+        assert t is not None and t.ra == pytest.approx(269.452) and t.dec == pytest.approx(4.693), text
+    assert targets.parse_coords("17h57m48.5s +4d41m36s").ra == pytest.approx(269.452, abs=1e-3)
+    assert targets.parse_coords("RA=10 Dec=-4.5").dec == pytest.approx(-4.5)
+    for name in ["M 42", "HD 209458", "Andromeda", "2MASS J0523-1403"]:
+        assert targets.parse_coords(name) is None and not targets.looks_like_coords(name), name
+    assert targets.looks_like_coords("400 10")  # out of range: a bad position, not a SIMBAD name

@@ -64,22 +64,40 @@ def preset(text: str) -> Target | None:
     return PRESETS.get(name) if name else None
 
 
+_DEC_NUM = r"[+\-−]?\d+(?:\.\d*)?|[+\-−]?\.\d+"
+
+
 def parse_coords(text: str) -> Target | None:
-    """Accept '269.45 4.74', '269.45, 4.74' or sexagesimal '17 57 48.5 +04 41 36'."""
-    t = text.strip().replace(",", " ")
-    nums = t.split()
+    """Accept decimal degrees in many spellings ('269.45 4.74', '269.45, -4.74', '269.45° +4.74°',
+    'RA=269.45 Dec=4.74', '269.45d 4.74d') or sexagesimal ('17 57 48.5 +04 41 36', '17h57m48.5s +4d41m36s')."""
+    t = text.strip().lower().replace("−", "-").replace(",", " ").replace(";", " ")
+    t = re.sub(r"(?<![a-z])(ra|dec|de|alpha|delta)(?![a-z])\s*[:=]?", " ", t)
+    t = t.replace("=", " ").strip()
+    if not t or re.search(r"[a-ce-gi-ln-rt-z]", t):  # letters other than d h m s: a name, not a position
+        return None
+    # decimal degrees: exactly two numbers, optionally followed by ° or d (no h/m/s/: anywhere)
+    dec_tokens = re.fullmatch(rf"\s*({_DEC_NUM})\s*(?:°|deg|d)?\s+({_DEC_NUM})\s*(?:°|deg|d)?\s*", t)
+    if dec_tokens:
+        ra, dec = float(dec_tokens.group(1)), float(dec_tokens.group(2))
+        if 0 <= ra < 360 and -90 <= dec <= 90:
+            return Target(f"RA {ra:.5f}, Dec {dec:+.5f}", ra, dec, source="coordinates")
+        return None
     try:
-        if len(nums) == 2 and all(re.fullmatch(r"[+-]?\d+(\.\d*)?", n) for n in nums):
-            ra, dec = float(nums[0]), float(nums[1])
-            if 0 <= ra < 360 and -90 <= dec <= 90:
-                return Target(f"RA {ra:.5f}, Dec {dec:+.5f}", ra, dec, source="coordinates")
-            return None
-        if re.fullmatch(r"[\d\s:hmsd'\"+\-.°]+", t) and len(nums) >= 2:
+        if re.fullmatch(r"[\d\s:hmsd'\"+\-.°]+", t) and len(t.split()) >= 2:
             c = SkyCoord(t, unit=(u.hourangle, u.deg))
             return Target(f"RA {c.ra.deg:.5f}, Dec {c.dec.deg:+.5f}", c.ra.deg, c.dec.deg, source="coordinates")
     except (ValueError, u.UnitsError):
         return None
     return None
+
+
+def looks_like_coords(text: str) -> bool:
+    """True when the text is mostly numbers (the user meant a position, even if we could not read it)."""
+    s = re.sub(r"(?i)(?<![a-z])(ra|dec)(?![a-z])", " ", text or "")
+    if len(re.findall(r"\d+(?:\.\d*)?", s)) < 2:  # "M 42" is a name, "269.4 4.7" a position
+        return False
+    t = re.sub(r"[\s,;:=°'\"hmsdHMSD+\-.−]", "", s)
+    return bool(t) and t.isdigit()
 
 
 def _num(row, *names):
@@ -106,7 +124,8 @@ def simbad_lookup(name: str) -> Target:
     last = None
     for url in config.SIMBAD_TAPS:
         try:
-            r = requests.get(url, params=dict(REQUEST="doQuery", LANG="ADQL", FORMAT="csv", QUERY=q), timeout=20)
+            r = requests.get(url, params=dict(REQUEST="doQuery", LANG="ADQL", FORMAT="csv", QUERY=q),
+                             timeout=(5, 20))  # short connect timeout: a dead mirror costs 5 s, not 20
             r.raise_for_status()
             rows = list(csv.DictReader(io.StringIO(r.text)))
         except Exception as e:  # try the next mirror
@@ -129,7 +148,12 @@ def simbad_lookup(name: str) -> Target:
 def resolve(text: str) -> Target:
     if not text or not text.strip():
         raise TargetNotFound("empty")
-    return preset(text) or parse_coords(text) or simbad_lookup(text.strip())
+    hit = preset(text) or parse_coords(text)
+    if hit:
+        return hit
+    if looks_like_coords(text):  # numbers we could not read: do not send them to SIMBAD
+        raise TargetNotFound(text)
+    return simbad_lookup(text.strip())
 
 
 def position_at(t: Target, mjd: float) -> tuple[float, float]:

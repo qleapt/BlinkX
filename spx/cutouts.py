@@ -15,7 +15,7 @@ import re
 import threading
 import time
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -434,6 +434,21 @@ def _load(path) -> Stamp:
                  z["variance"], z["zodi"], m["header"], m["flag_bits"], m["wavelength"], m["bandwidth"])
 
 
+def _first_ok(futs):
+    """Result of whichever future succeeds first; raise only if all of them fail."""
+    pending, last = set(futs), None
+    while pending:
+        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+        for f in done:
+            if f.exception() is None:
+                return f.result()
+            last = f.exception()
+    raise last
+
+
+_HEDGE_POOL = ThreadPoolExecutor(48)
+
+
 def get_stamp(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> Stamp:
     path = config.cache_dir() / f"st_{_key(exp, ra, dec, size_arcmin)}.npz"
     if path.exists():
@@ -442,16 +457,21 @@ def get_stamp(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> Stamp
         except Exception:
             path.unlink(missing_ok=True)
     url = cutout_url(exp, ra, dec, size_arcmin)
-    st = None
-    if has_wave_table(exp) and config.USE_S3:
-        try:
-            st = fetch_s3_stamp(exp, ra, dec, size_arcmin, wave_table(exp, url))
-        except Exception:
-            st = None  # fall back to the IRSA cutout service
-    if st is not None:
-        pass
-    elif has_wave_table(exp):
-        st = parse_stamp(fetch_prefix(url), exp, ra, dec, wave_table(exp, url))
+    if has_wave_table(exp):
+        table = wave_table(exp, url)
+
+        def irsa():
+            return parse_stamp(fetch_prefix(url), exp, ra, dec, table)
+        if config.USE_S3:
+            # Race: the AWS copy is fast on a good connection but reads whole detector rows (~10x the
+            # bytes); the IRSA cutout is small. If AWS has not answered within HEDGE_AFTER seconds,
+            # ask IRSA as well and keep whichever arrives first (slow or distant connections).
+            fs = _HEDGE_POOL.submit(fetch_s3_stamp, exp, ra, dec, size_arcmin, table)
+            wait([fs], timeout=config.HEDGE_AFTER)
+            futs = [fs] if fs.done() and fs.exception() is None else [fs, _HEDGE_POOL.submit(irsa)]
+            st = _first_ok(futs)
+        else:
+            st = irsa()
     else:  # first exposure of this detector: one full download, keep its wavelength table
         raw = fetch_full(url)
         hd = fits.open(io.BytesIO(raw))
@@ -468,8 +488,18 @@ def is_cached(exp: Exposure, ra: float, dec: float, size_arcmin: float) -> bool:
     return (config.cache_dir() / f"st_{_key(exp, ra, dec, size_arcmin)}.npz").exists()
 
 
-def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, progress=None):
-    """Returns (stamps sorted by time, number of failures)."""
+_FETCH_POOL = ThreadPoolExecutor(max(config.MAX_CONCURRENT, config.S3_CONCURRENT // 2))
+
+
+def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, progress=None,
+               deadline: float | None = None, enough=None, stats: dict | None = None):
+    """Returns (stamps sorted by time, number of failures).
+
+    deadline / enough: after `deadline` seconds, return as soon as enough(stamps) is True. The
+    downloads still running carry on in the background and land in the cache for the next view,
+    so a slow connection never keeps the page waiting for the last few images. `stats['skipped']`
+    receives how many were still downloading."""
+    t0 = time.time()
     stamps, fails, done = [], 0, 0
     exps = list(exps)
     # one exposure per detector without a cached wavelength table goes first, alone
@@ -487,16 +517,21 @@ def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, 
         if progress:
             progress(done, len(exps) + done)
     total = len(exps) + done
-    workers = max(config.MAX_CONCURRENT, config.S3_CONCURRENT // 2) if config.USE_S3 else config.MAX_CONCURRENT
-    with ThreadPoolExecutor(workers) as ex:
-        futs = {ex.submit(get_stamp, e, ra, dec, size_arcmin): e for e in exps}
-        for f in as_completed(futs):
+    pending = {_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in exps}
+    while pending:
+        finished, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+        for f in finished:
             done += 1
-            try:
+            if f.exception() is None:
                 stamps.append(f.result())
-            except Exception:
+            else:
                 fails += 1
             if progress:
                 progress(done, total)
+        if (pending and deadline is not None and time.time() - t0 > deadline
+                and stamps and (enough is None or enough(stamps))):
+            break  # the rest keep downloading into the cache
     stamps.sort(key=lambda s: s.mjd)
+    if stats is not None:
+        stats["skipped"] = len(pending)
     return stamps, fails

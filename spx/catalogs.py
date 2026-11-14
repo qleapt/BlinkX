@@ -12,7 +12,7 @@ import requests
 from . import config
 
 
-def _tap_csv(url: str, adql: str, timeout: float = 40) -> list[dict]:
+def _tap_csv(url: str, adql: str, timeout=(6, 40)) -> list[dict]:
     r = requests.get(url, params={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql},
                      timeout=timeout)
     r.raise_for_status()
