@@ -122,7 +122,8 @@ tests/              pytest on synthetic data
 - SPHEREx Level 2 images: NASA/IPAC Infrared Science Archive (IRSA), Caltech/IPAC, NASA.
 - Gaia DR3: European Space Agency, Gaia mission, via the ESA Gaia archive or CDS VizieR (I/355).
 - WISE All-Sky single-exposure images and 2MASS images: IRSA.
-- Target names: SIMBAD, CDS Strasbourg.
+- Target names: SIMBAD, CDS Strasbourg (the app falls back to the official CfA and IDIA mirrors when the main
+  site is down, as it was on 14 Nov 2026).
 
 ## Use of AI
 

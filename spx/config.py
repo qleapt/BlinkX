@@ -14,7 +14,13 @@ IRSA = "https://irsa.ipac.caltech.edu"
 TAP_URL = f"{IRSA}/TAP/sync"
 ARTIFACT_TABLE = "spherex.artifact"
 PLANE_TABLE = "spherex.plane"
-GAIA_TAP = "https://gea.esac.esa.int/tap-server/tap/sync"
+# SIMBAD name lookup: main site first, then the official mirrors (the main site was down on 2026-11-14)
+SIMBAD_TAPS = [
+    "https://simbad.cds.unistra.fr/simbad/sim-tap/sync",
+    "https://simbad.cfa.harvard.edu/simbad/sim-tap/sync",
+    "https://simbad.idia.ac.za/simbad/sim-tap/sync",
+]
+GAIA_TAP ="https://gea.esac.esa.int/tap-server/tap/sync"
 VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 GAIA_MAX_G = 19.0
 GAIA_TOP = 800

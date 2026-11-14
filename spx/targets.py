@@ -96,23 +96,34 @@ def _num(row, *names):
 
 
 def simbad_lookup(name: str) -> Target:
-    from astroquery.simbad import Simbad
-    s = Simbad()
-    s.add_votable_fields("pmra", "pmdec", "parallax")
-    res = s.query_object(name)
-    if res is None or len(res) == 0:
-        raise TargetNotFound(name)
-    row = res[0]
-    cols = {c.lower(): c for c in res.colnames}
-    if "ra" in cols and not isinstance(row[cols["ra"]], str):
-        ra, dec = float(row[cols["ra"]]), float(row[cols["dec"]])
-    else:  # older astroquery: sexagesimal RA/DEC columns
-        c = SkyCoord(row[cols["ra"]], row[cols["dec"]], unit=(u.hourangle, u.deg))
-        ra, dec = c.ra.deg, c.dec.deg
-    res.rename_columns(res.colnames, [c.lower() for c in res.colnames])
-    row = res[0]
-    return Target(name, ra, dec, J2000_MJD, _num(row, "pmra"), _num(row, "pmdec"),
-                  _num(row, "plx_value", "plx", "parallax"), "SIMBAD (J2000)")
+    """SIMBAD TAP (identifiers are matched case- and space-insensitively), with mirrors."""
+    import csv
+    import io
+    import requests
+    from . import config
+    q = ("SELECT TOP 1 b.main_id, b.ra, b.dec, b.pmra, b.pmdec, b.plx_value FROM basic b "
+         f"JOIN ident i ON i.oidref = b.oid WHERE i.id = '{name.strip()[:80].replace(chr(39), chr(39) * 2)}'")
+    last = None
+    for url in config.SIMBAD_TAPS:
+        try:
+            r = requests.get(url, params=dict(REQUEST="doQuery", LANG="ADQL", FORMAT="csv", QUERY=q), timeout=20)
+            r.raise_for_status()
+            rows = list(csv.DictReader(io.StringIO(r.text)))
+        except Exception as e:  # try the next mirror
+            last = e
+            continue
+        if not rows or not rows[0].get("ra"):
+            raise TargetNotFound(name)
+        row = rows[0]
+
+        def f(k):
+            try:
+                return float(row.get(k) or 0.0)
+            except ValueError:
+                return 0.0
+        return Target(name, f("ra"), f("dec"), J2000_MJD, f("pmra"), f("pmdec"), f("plx_value"),
+                      f"SIMBAD: {row.get('main_id', name).strip()} (J2000)")
+    raise RuntimeError(f"SIMBAD unreachable ({type(last).__name__})")
 
 
 def resolve(text: str) -> Target:
