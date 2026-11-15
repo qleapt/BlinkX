@@ -1,4 +1,4 @@
-# SPHEREx Blink Viewer
+# blinkX: SPHEREx blink viewer
 
 **NASA Space Apps Challenge 2026 · SPHEREx challenge.** Type an object name or a sky position and watch
 SPHEREx images of that patch of sky play as a short movie. Stars that move (like Barnard's Star) or change

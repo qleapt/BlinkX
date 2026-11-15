@@ -1,1 +1,1 @@
-"""SPHEREx Blink Viewer library."""
+"""blinkX (SPHEREx blink viewer) library."""

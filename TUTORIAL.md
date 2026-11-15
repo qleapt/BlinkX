@@ -1,4 +1,4 @@
-# SPHEREx Blink Viewer: tutorial
+# blinkX: tutorial
 
 A hands-on guide for first-time users: students, judges, amateur astronomers. In about 20 minutes you will catch
 a star moving across the sky, watch the coldest known brown dwarf jump, measure a star's speed and read an

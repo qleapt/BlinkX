@@ -38,7 +38,7 @@ TR: dict[str, str] = {
         "Zonklayan dev yıldız (~8 ayda parlayıp söner)",
     # --- sidebar ----------------------------------------------------------------------------
     "Language / Dil": "Language / Dil",
-    "SPHEREx Blink": "SPHEREx Blink",
+    "blinkX": "blinkX",
     "**① What to look at**": "**① Neye bakılacak**",
     "Object name or sky position (RA Dec in degrees)": "Cisim adı veya gökyüzü konumu (derece cinsinden RA Dec)",
     "Type the name of a star, galaxy or nebula (looked up in the SIMBAD catalogue), or a sky position as two "
@@ -71,7 +71,7 @@ TR: dict[str, str] = {
         "alanların yüklenmesi biraz daha uzun sürer.",
     "**③ Extras**": "**③ Ekstralar**",
     "What to look at": "Neye bakılacak", "Colour and size": "Renk ve boyut", "Extras": "Ekstralar",
-    "SPHEREx Blink Viewer": "SPHEREx Blink Görüntüleyici",
+    "blinkX · SPHEREx blink viewer": "blinkX · SPHEREx blink görüntüleyici",
     "Load the Gaia star list": "Gaia yıldız listesini yükle",
     "Fetches the stars catalogued by ESA's Gaia satellite. They stay hidden until you tick *Gaia stars* in the "
     "viewer; then each is drawn as a blue circle where it should be on that date. Hover a circle for its details.":

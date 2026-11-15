@@ -1,4 +1,4 @@
-"""SPHEREx Blink Viewer: type a sky position or object name, watch SPHEREx images of it blink."""
+"""blinkX (SPHEREx blink viewer): type a sky position or object name, watch SPHEREx images of it blink."""
 from __future__ import annotations
 
 import numpy as np
@@ -16,7 +16,7 @@ from astropy.time import Time
 from spx import (archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, prefetch, render, stack,
                  targets, teleport, theme, viewer, warp)
 
-st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
+st.set_page_config(page_title="blinkX · SPHEREx blink viewer", layout="wide")
 # English / Turkish: everything Streamlit shows goes through i18n.tr() when Turkish is chosen
 i18n.install(lambda: st.session_state.get("lang", "en"))
 
@@ -323,7 +323,7 @@ def _sec(icon, text):
 
 st.html(theme.CSS)
 with st.sidebar:
-    st.html(theme.brand("SPHEREx Blink", i18n.tr(
+    st.html(theme.brand("blinkX", i18n.tr(
         "SPHEREx photographs the whole sky every six months in 102 infrared colours. Flip between its photos of one "
         "spot: whatever moves or changes brightness stands out.", ss.lang)))
     st.segmented_control("Language / Dil", list(i18n.LANGS), key="lang", required=True, format_func=i18n.LANGS.get,
