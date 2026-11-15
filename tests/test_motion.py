@@ -203,3 +203,34 @@ def test_fit_as_target_draws_the_same_path_in_the_viewer():
     ra, dec = targets.position_at(t, T0 + 900)
     pra, pdec, _, _ = f.predict([T0 + 900])
     assert abs((ra - pra[0]) * np.cos(np.radians(DEC0)) * 3600) < 0.05 and abs((dec - pdec[0]) * 3600) < 0.05
+
+
+def test_marks_of_two_objects_on_the_same_photos_are_sorted_into_two_objects():
+    p1, p2 = dict(uid="exp:1", mjd=61000.0), dict(uid="exp:2", mjd=61000.01)
+    marks = [dict(p1, ra=100.0, dec=20.0), dict(p1, ra=100.01, dec=20.0),          # photo 1: A, then B
+             dict(p2, ra=100.0102, dec=20.0001), dict(p2, ra=100.0, dec=20.0001)]  # photo 2: B, then A
+    assert motion.group_marks(marks) == [[0, 3], [1, 2]]
+
+
+def test_two_objects_14_minutes_apart_a_star_and_an_asteroid_are_compared():
+    t0, dt, cosd = 61000.0, 14 / 1440, np.cos(np.radians(20))
+    a = [motion.Obs(t0, 100.0, 20.0, 0.6, "#1"), motion.Obs(t0 + dt, 100.0, 20.0, 0.6, "#3")]
+    b = [motion.Obs(t0, 100.01, 20.0, 0.6, "#2"), motion.Obs(t0 + dt, 100.01 + 7 / 3600 / cosd, 20.0, 0.6, "#4")]
+    c = motion.compare(motion.fit(a), motion.fit(b), a, b)
+    assert c.unit == "″/min" and c.rel / c.per == pytest.approx(0.5, abs=0.01) and c.way == "east"
+    assert [s["sep"] for s in c.shared] == pytest.approx([33.83, 40.83], abs=0.05)   # measured on both photos
+    assert c.rate / c.per == pytest.approx(0.5, abs=0.01) and not c.together         # drifting apart
+    text = " ".join(motion.comparison_text(c))
+    assert "drifting apart by 0.50″/min." in text and "Only B moves" in text
+
+
+def test_a_pair_moving_together_is_called_so_and_keeps_its_distance():
+    mjds = 61000.0 + np.array([0.0, 180.0, 365.0, 545.0])
+    def path(ra0):
+        return [motion.Obs(m, ra0 + 2.0 * (m - 61000) / 365.25 / 3600 / np.cos(np.radians(-30)), -30.0, 0.3, f"#{k}")
+                for k, m in enumerate(mjds)]
+    a, b = path(50.0), path(50.005)
+    c = motion.compare(motion.fit(a), motion.fit(b), a, b)
+    assert c.together and c.unit == "″/yr" and c.rel_sig < 3
+    assert c.sep_ahead == pytest.approx(c.shared[0]["sep"], abs=1.0)
+    assert "move together" in " ".join(motion.comparison_text(c))

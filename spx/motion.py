@@ -509,3 +509,208 @@ def classify(obs, f: Fit, ecl_lat: float | None = None, gaia=None, left_behind=N
     best = max(prob, key=prob.get)
     horizon = 3 if best == "solar_system" else 3652.5 if best in ("pm_star", "static") else 365.25
     return Classification(best=best, prob=prob, reasons=reasons, variable=variable, horizon_days=horizon)
+
+
+# --- two objects in the same photos ---------------------------------------------------------------------------
+def group_marks(marks: list) -> list:
+    """The user's marks sorted into objects, as a first guess the user can change: marks on one photo are different
+    objects; a mark on another photo joins the object whose latest mark is nearest on the sky (each object once per
+    photo). Returns indices into marks, one list per object, in the order the objects were first marked."""
+    def photo(m):
+        return m.get("uid") or str(round(float(m["mjd"]) * 86400))
+
+    def dist(a, b):
+        de = ((b["ra"] - a["ra"] + 180) % 360 - 180) * np.cos(np.radians(0.5 * (a["dec"] + b["dec"])))
+        return float(np.hypot(de, b["dec"] - a["dec"]))
+    photos: dict = {}
+    for i, m in enumerate(marks):
+        photos.setdefault(photo(m), []).append(i)
+    order = sorted(photos.values(), key=lambda ix: min(float(marks[i]["mjd"]) for i in ix))
+    objects: list = []
+    for ix in order:
+        cands = sorted((dist(marks[objects[k][-1]], marks[i]), k, i) for k in range(len(objects)) for i in ix)
+        used_k, used_i = set(), set()
+        for _, k, i in cands:
+            if k not in used_k and i not in used_i:
+                objects[k].append(i)
+                used_k.add(k)
+                used_i.add(i)
+        for i in ix:
+            if i not in used_i:
+                objects.append([i])
+    return [sorted(o, key=lambda i: float(marks[i]["mjd"])) for o in objects]
+
+
+def velocity(f: Fit):
+    """The object's motion (east, north, "/yr) at its mean date and its 2x2 covariance. A static object moves 0, with
+    the uncertainty of the drift that cannot be ruled out."""
+    if f.model != "static":
+        names, p, cov = PARAMS[f.model], f.p, f.cov
+    elif f.pp is not None:
+        names, p, cov = PARAMS[f.pmodel], f.pp, f.pcov
+    else:
+        return np.zeros(2), np.full((2, 2), np.inf)
+    ie, inn = names.index("mu_e"), names.index("mu_n")
+    v = np.zeros(2) if f.model == "static" else np.array([p[ie], p[inn]], float)
+    return v, np.asarray(cov)[np.ix_([ie, inn], [ie, inn])]
+
+
+def speed_unit(span_days: float):
+    """('"/min' | '"/h' | '"/yr', how many of those units in a year): the unit that suits marks this far apart."""
+    if span_days < 1 / 24:
+        return "″/min", YEAR * 1440
+    if span_days < 5:
+        return "″/h", YEAR * 24
+    return "″/yr", 1.0
+
+
+@dataclass
+class Comparison:
+    unit: str            # speeds below are "/yr; divide by per for the unit shown
+    per: float
+    shared: list         # photos both objects are marked on: mjd, de, dn (B - A, "), sep, err, pa, way, la, lb
+    rel_e: float         # B relative to A, "/yr
+    rel_n: float
+    rel: float
+    rel_err: float
+    rel_sig: float
+    pa: float            # direction B moves relative to A (deg east of north) and in words
+    way: str
+    t_now: float         # the last mark (mjd); the separation then and how fast it changes ("/yr, + apart)
+    sep_now: float
+    rate: float
+    rate_err: float
+    speed_a: float
+    speed_b: float
+    together: bool       # both move, with the same motion within the uncertainties
+    both_still: bool
+    path: dict           # mjd, sep, se (") along the fitted paths and ahead; future: bool
+    ahead_days: float
+    sep_ahead: float
+    sep_ahead_err: float
+
+
+def _en(ra, dec, ref_ra, ref_dec):
+    e = ((np.asarray(ra) - ref_ra + 180) % 360 - 180) * np.cos(np.radians(ref_dec)) * 3600
+    return e, (np.asarray(dec) - ref_dec) * 3600
+
+
+def compare(fa: Fit, fb: Fit, obs_a: list, obs_b: list) -> Comparison:
+    """Object B against object A: their separation on the photos both are marked on (measured), how fast B moves
+    relative to A (the difference of the two fitted motions), whether they drift apart or close in, and their
+    separation predicted ahead along both fitted paths."""
+    from .detect import COMPASS
+    span = float(max(fa.span_days, fb.span_days))
+    unit, per = speed_unit(span)
+    ref_ra, ref_dec = fa.ref_ra, fa.ref_dec
+    shared = []
+    for a in sorted(obs_a, key=lambda o: o.mjd):
+        for b in obs_b:
+            if abs(a.mjd - b.mjd) < 1e-4:   # the same photo (9 s)
+                ae, an = _en(a.ra, a.dec, ref_ra, ref_dec)
+                be, bn = _en(b.ra, b.dec, ref_ra, ref_dec)
+                de, dn = float(be - ae), float(bn - an)
+                pa = float(np.degrees(np.arctan2(de, dn)) % 360)
+                shared.append(dict(mjd=float(a.mjd), de=de, dn=dn, sep=float(np.hypot(de, dn)),
+                                   err=float(np.hypot(a.err, b.err)), pa=pa, way=COMPASS[int(round(pa / 45)) % 8],
+                                   la=a.label, lb=b.label))
+                break
+    va, ca = velocity(fa)
+    vb, cb = velocity(fb)
+    dv, C = vb - va, ca + cb
+    finite = bool(np.all(np.isfinite(C)))
+    rel = float(np.hypot(*dv))
+    u = dv / rel if rel > 0 else np.array([np.sqrt(0.5), np.sqrt(0.5)])
+    rel_err = float(np.sqrt(max(u @ C @ u, 0.0))) if finite else float("inf")
+    rel_sig = rel / rel_err if rel_err > 0 else float("inf")
+    pa = float(np.degrees(np.arctan2(dv[0], dv[1])) % 360)
+
+    def sep_at(mjds):
+        ra_a, de_a, sea, sna = fa.predict(mjds)
+        ra_b, de_b, seb, snb = fb.predict(mjds)
+        ae, an = _en(ra_a, de_a, ref_ra, ref_dec)
+        be, bn = _en(ra_b, de_b, ref_ra, ref_dec)
+        err = np.sqrt((np.hypot(sea, sna) ** 2 + np.hypot(seb, snb) ** 2) / 2)
+        return be - ae, bn - an, np.hypot(be - ae, bn - an), err
+    first = float(min(np.min(fa.mjd), np.min(fb.mjd)))
+    t_now = float(max(np.max(fa.mjd), np.max(fb.mjd)))
+    se_, sn_, s_now, _ = sep_at([t_now])
+    if s_now[0] > 0:
+        uh = np.array([se_[0], sn_[0]]) / s_now[0]
+        rate = float(uh @ dv)
+        rate_err = float(np.sqrt(max(uh @ C @ uh, 0.0))) if finite else float("inf")
+    else:
+        rate, rate_err = rel, rel_err
+    ahead = max(span, YEAR) if span >= 5 else max(3 * span, 1 / 24)
+    mjds = np.linspace(first, t_now + ahead, 200)
+    _, _, s, err = sep_at(mjds)
+    _, _, s_end, e_end = sep_at([t_now + ahead])
+    moving_a, moving_b = fa.model != "static", fb.model != "static"
+    return Comparison(unit=unit, per=per, shared=shared, rel_e=float(dv[0]), rel_n=float(dv[1]), rel=rel,
+                      rel_err=rel_err, rel_sig=rel_sig, pa=pa, way=COMPASS[int(round(pa / 45)) % 8],
+                      t_now=t_now, sep_now=float(s_now[0]), rate=rate, rate_err=rate_err,
+                      speed_a=float(fa.mu), speed_b=float(fb.mu),
+                      together=moving_a and moving_b and rel_sig < 3, both_still=not moving_a and not moving_b,
+                      path=dict(mjd=mjds, sep=s, se=err, future=mjds > t_now), ahead_days=float(ahead),
+                      sep_ahead=float(s_end[0]), sep_ahead_err=float(e_end[0]))
+
+
+def span_words(days: float) -> str:
+    if days < 1 / 24:
+        return f"{days * 1440:.0f} minutes"
+    if days < 2:
+        return f"{days * 24:.1f} hours"
+    if days < 730:
+        return f"{days:.0f} days"
+    return f"{days / YEAR:.1f} years"
+
+
+def comparison_text(c: Comparison, a: str = "A", b: str = "B") -> list:
+    """The comparison in plain sentences, each a finding the numbers support."""
+    def v(x):
+        return f"{x / c.per:.2f}{c.unit}"
+    out = []
+    if c.shared:
+        s0, s1 = c.shared[0], c.shared[-1]
+        out.append(f"On the first photo with both, {b} is {s0['sep']:.1f}″ ± {s0['err']:.1f}″ to the {s0['way']} "
+                   f"of {a}.")
+        if len(c.shared) >= 2:
+            d = s1["sep"] - s0["sep"]
+            e = float(np.hypot(s0["err"], s1["err"]))
+            out.append(f"{span_words(s1['mjd'] - s0['mjd'])} later they are {s1['sep']:.1f}″ apart: the distance "
+                       + (f"grew by {d:.1f}″" if d > 0 else f"shrank by {-d:.1f}″")
+                       + (f" ({abs(d) / e:.1f}σ, a real change)." if abs(d) > 3 * e else
+                          f" ({abs(d) / e:.1f}σ, within the measuring error)."))
+    else:
+        out.append("No photo has marks of both, so their distance comes from the two fitted paths.")
+    if c.both_still:
+        out.append(f"Neither moves measurably, so they keep their distance (relative motion under "
+                   f"{v(3 * c.rel_err)}, 3σ).")
+    elif c.rel_sig >= 3:
+        out.append(f"{b} moves relative to {a} at {v(c.rel)} ± {v(c.rel_err)} toward the {c.way} "
+                   f"({c.rel_sig:.1f}σ).")
+        if abs(c.rate) > 3 * c.rate_err:
+            side = float(np.sqrt(max(c.rel ** 2 - c.rate ** 2, 0.0)))
+            out.append(("They are drifting apart" if c.rate > 0 else "They are closing in") + f" by {v(abs(c.rate))}"
+                       + (f", while also moving {v(side)} sideways past each other." if side > 3 * c.rel_err else "."))
+        else:
+            out.append("Their distance hardly changes: the relative motion is sideways, past each other.")
+    elif c.rel > c.rel_err:
+        out.append(f"{b}'s motion relative to {a}, {v(c.rel)} ± {v(c.rel_err)} toward the {c.way}, is not certain "
+                   f"({c.rel_sig:.1f}σ; 3σ or more counts as measured). More dates would settle it.")
+    else:
+        out.append(f"No relative motion is measured: under {v(3 * c.rel_err)} (3σ).")
+    if c.speed_a > 0 and c.speed_b > 0:
+        k = c.speed_b / c.speed_a
+        out.append(f"Speeds: {a} {v(c.speed_a)}, {b} {v(c.speed_b)}"
+                   + (f"; {b} is {k:.1f}× as fast as {a}." if k >= 1.2 else
+                      f"; {a} is {1 / k:.1f}× as fast as {b}." if k <= 1 / 1.2 else "; about the same speed."))
+    elif c.speed_a > 0 or c.speed_b > 0:
+        mover, still = (a, b) if c.speed_a > 0 else (b, a)
+        out.append(f"Only {mover} moves ({v(max(c.speed_a, c.speed_b))}); {still} stands still.")
+    if c.together:
+        out.append("They move together (same speed and direction within the uncertainties): a pair travelling "
+                   "through space together, such as a wide binary, is possible.")
+    out.append(f"Along both fitted paths they will be {c.sep_ahead:.1f}″ ± {c.sep_ahead_err:.1f}″ apart "
+               f"{span_words(c.ahead_days)} after the last mark.")
+    return out

@@ -8,7 +8,6 @@ import re
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, asdict
 
 import numpy as np
@@ -209,22 +208,64 @@ def _fresh(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
 
 
 def _search(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
-    # Fast path: SIA answers in 1-3 s but can return only part of the list in very dense fields
-    # (R Draconis: 539 of 2,493), so the complete TAP search runs in the background and replaces it.
+    # SIA answers in 1-3 s but can return only part of the list in very dense fields (R Draconis: 539 of 2,493);
+    # TAP is complete but slower. A position never searched asks both at once: the first list with photos is
+    # shown, and the complete one replaces it when it arrives. When NASA's archive is struggling (one service
+    # failing, the other slow), whichever still answers wins, instead of trying them one after the other.
     sia_path = _sia_path(ra, dec)
     rows = _from_cache(sia_path, config.SIA_CACHE_HOURS) if use_cache else None
-    if rows is None:
-        try:
-            rows = search_sia(ra, dec)
-            sia_path.write_text(json.dumps({"t": time.time(), "rows": [asdict(e) for e in rows]}))
-        except Exception:
-            rows = None
     if rows:
         _complete_later(ra, dec)
         return rows
-    if rows is None:   # SIA failed even after its retries: TAP, with SIA tried again alongside
-        return _tap_or_sia(ra, dec)
-    return search_tap(ra, dec)   # SIA found nothing here: make sure with the complete search
+    tap = _tap_race(ra, dec)
+    sia = _RACE.submit(_sia_saved, ra, dec)
+    pending, sia_empty, last_try = {tap, sia}, False, time.time()
+    while pending:
+        done, pending = wait(pending, timeout=config.SEARCH_RETRY_SIA, return_when=FIRST_COMPLETED)
+        for f in done:
+            if f is tap:
+                full = f.result()        # None: TAP failed after its retries
+                if full is not None:
+                    return full          # the complete list (also when it is empty)
+                tap = None
+            else:
+                try:
+                    quick = f.result()
+                except Exception:
+                    quick = None
+                if quick:
+                    return quick         # TAP carries on in the background and replaces it
+                sia_empty = sia_empty or quick == []
+        if tap is None and not pending:  # TAP gave up
+            if sia_empty:
+                return []
+            raise ArchiveBusy("NASA's archive did not answer")
+        if tap is not None and not any(f is not tap for f in pending) and not sia_empty                 and time.time() - last_try >= config.SEARCH_RETRY_SIA:   # SIA failed: ask it again meanwhile
+            pending.add(_RACE.submit(_sia_saved, ra, dec))
+            last_try = time.time()
+    return []
+
+
+def _sia_saved(ra: float, dec: float) -> list[Exposure]:
+    rows = search_sia(ra, dec)
+    _sia_path(ra, dec).write_text(json.dumps({"t": time.time(), "rows": [asdict(e) for e in rows]}))
+    return rows
+
+
+_RACE = ThreadPoolExecutor(8, thread_name_prefix="spx-race")   # the searches a page is waiting for
+
+
+def _tap_race(ra: float, dec: float):
+    """The complete TAP search for this position, started now on the page's own threads (or the one already
+    running); registered as this position's complete list (complete_future)."""
+    key = (round(ra, 4), round(dec, 4))
+    with _PENDING_LOCK:
+        f = _TAPS.get(key)
+        if f is not None and not (f.done() and f.result() is None):
+            return f
+        f = _TAPS[key] = _RACE.submit(_quiet_tap, ra, dec)
+        _PENDING.add(key)
+        return f
 
 
 _BG = ThreadPoolExecutor(2)
@@ -251,29 +292,6 @@ def _complete_later(ra: float, dec: float):
         return _TAPS.get(key)
 
 
-def _tap_or_sia(ra: float, dec: float) -> list[Exposure]:
-    """SIA failed: the complete TAP search (as patient as before) while SIA is asked again every few seconds.
-    The first list with photos wins; a list from SIA leaves TAP running to replace it later, as usual."""
-    tap = _TAP_POOL.submit(search_tap, ra, dec)
-    with _PENDING_LOCK:
-        key = (round(ra, 4), round(dec, 4))
-        _PENDING.add(key)
-        _TAPS[key] = tap
-    while True:
-        try:
-            return tap.result(timeout=8)
-        except FutureTimeout:
-            pass
-        try:
-            rows = search_sia(ra, dec)
-        except Exception:
-            continue
-        if rows:
-            _sia_path(ra, dec).write_text(json.dumps({"t": time.time(), "rows": [asdict(e) for e in rows]}))
-            return rows
-
-
-_TAP_POOL = ThreadPoolExecutor(2, thread_name_prefix="spx-tap")
 
 
 def complete_future(ra: float, dec: float):

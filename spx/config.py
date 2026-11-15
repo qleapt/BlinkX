@@ -77,6 +77,7 @@ HEDGE_AFTER = 5.0          # s: also ask IRSA when the AWS read is this slow (di
 SEARCH_HEDGE_AFTER = 2.5   # s: ask the SIA search again when an answer is this slow (it usually takes 1-3 s,
                            # but now and then 7-30 s: a second request then usually answers first)
 SEARCH_TRIES = 3           # SIA requests per collection (staggered) before falling back to TAP
+SEARCH_RETRY_SIA = 6.0     # s: while the complete search (TAP) runs, a failed quick search (SIA) is asked again
 SEARCH_STALE_WAIT = 2.0    # s: a spot searched before (over 12 h ago) waits this long for a fresh list, then uses
                            # the saved one; the fresh search carries on and is saved for next time
 # /RTP: random spots are picked ahead of time and loaded quietly in the background, so a jump lands at once. The

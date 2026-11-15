@@ -31,7 +31,11 @@ spot on every date and its brightness, and real sizes from a distance. **Check m
 of one object together (`spx/motion.py`): each is measured on its own photo, one path is fitted through all of them,
 every pair is compared and every mark is tested against the others (leave-one-out), Gaia is checked at each mark's
 date, and the object is classified (standing still, moving star, asteroid / comet, or not one object) with the
-reasons. The path is predicted years ahead (hours for an asteroid), on the sky and against time, with a table. Optional **helpers**, off until switched on: star detection, and
+reasons. The path is predicted years ahead (hours for an asteroid), on the sky and against time, with a table.
+Mark a **second object** on the same photos (for example a star next to an asteroid on two exposures 14 minutes
+apart) and put its marks under *object B*: both get their own check, and the app compares them: their distance on
+each photo, how fast B moves relative to A and in which direction, whether they drift apart or close in, whether
+they move together, and how far apart they will be. Optional **helpers**, off until switched on: star detection, and
 *Find what changed* (moved / brightened / faded, strongest first, allowing for all stars brightening together).
 Each view can be downloaded (GIF, CSV).
 
@@ -78,8 +82,9 @@ Embed in another page:
 
 1. **Find the images.** IRSA's SIA image search lists the SPHEREx exposures covering the target in 1–3 s
    (one call per release, in parallel). Because SIA can return only part of the list in very dense fields, the
-   complete ADQL query to IRSA's TAP service (`spherex.plane` joined with `spherex.artifact`) runs in the
-   background and replaces it as soon as it arrives. The position is first moved to 2026 with the
+   complete ADQL query to IRSA's TAP service (`spherex.plane` joined with `spherex.artifact`) is asked at the
+   same time and replaces it as soon as it arrives; when one of the two services is failing, the other one's
+   answer is used, and the loading screen says so after 8 s. The position is first moved to 2026 with the
    proper motion: Barnard's Star has moved 4.5′ since 2000.
 2. **Group into epochs.** A gap of more than 45 days starts a new epoch; dense fields near the ecliptic poles
    (R Draconis) are split into 60-day bins. A quick look loads up to 4 exposures per epoch; "Load all" adds more.

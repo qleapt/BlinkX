@@ -366,3 +366,29 @@ def test_the_loading_screens_count_down_and_the_motion_bar_shows_real_progress()
     assert warp.eta_text(125) == "2 min left" and warp.eta_text(0) == "almost done"
     body = warp.SCRIPT.split("<script>", 1)[1].rsplit("</script>", 1)[0]
     assert "spx-eta" in body and not _re.search(r"<[/\w!]", body)   # survives st.html's sanitizer
+
+
+def test_a_new_position_asks_both_searches_at_once_and_the_first_good_answer_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("SPHEREX_BLINK_CACHE", str(tmp_path))
+    monkeypatch.setattr(archive, "_TAPS", {})
+    monkeypatch.setattr(archive, "_PENDING", set())
+    quick, full = [Exposure("D1", 1.0, 1.0, "quick", "v")], [Exposure("D1", 1.0, 1.0, "full", "v")]
+
+    def run(sia, tap, ra):
+        monkeypatch.setattr(archive, "search_sia", sia)
+        monkeypatch.setattr(archive, "search_tap", tap)
+        t0 = time.time()
+        got = archive._search(ra, 0.0, True)
+        return got, time.time() - t0
+
+    def broken(ra, dec):
+        raise RuntimeError("HTTP 502")
+    got, took = run(broken, lambda ra, dec: time.sleep(0.2) or full, 1.0)
+    assert got == full and took < 1                      # SIA failing: TAP's answer, without waiting for SIA's retries
+    got, took = run(lambda ra, dec: quick, lambda ra, dec: time.sleep(3) or full, 2.0)
+    assert got == quick and took < 1                     # SIA first: shown at once, TAP replaces it later
+    got, _ = run(lambda ra, dec: [], lambda ra, dec: time.sleep(0.2) or full, 3.0)
+    assert got == full                                   # SIA found nothing: the complete search decides
+    monkeypatch.setattr(archive, "SEARCH_RETRY_SIA", 0.1, raising=False)
+    with pytest.raises(archive.ArchiveBusy):            # both fail: say so (the page tells the user)
+        run(broken, lambda ra, dec: time.sleep(0.1) or 1 / 0, 4.0)

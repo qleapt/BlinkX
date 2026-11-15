@@ -236,6 +236,34 @@ def track_time_fig(marks, model, today=None):
     return fig
 
 
+def separation_fig(path, measured, unit_note="", today=None):
+    """Distance between object B and object A against time: along both fitted paths (a 1-sigma band, the part
+    after the last mark dashed) and measured on the photos both were marked on.
+    path: dict datetime, sep, se, future (bool array); measured: dicts datetime, sep, err, label."""
+    t = list(path["datetime"])
+    v, s = np.asarray(path["sep"], float), np.asarray(path["se"], float)
+    fut = np.asarray(path["future"], bool)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=t + t[::-1], y=list(v + s) + list(np.clip(v - s, 0, None)[::-1]), fill="toself",
+                             mode="lines", line=dict(width=0), fillcolor="rgba(213,81,129,0.18)",
+                             name="uncertainty (1σ)", hoverinfo="skip"))
+    for sel, name, col, dash in ((~fut, "from the two fitted paths", ACCENT, "solid"),
+                                 (fut, "predicted", FUTURE, "dash")):
+        if sel.any():
+            fig.add_trace(go.Scatter(x=[x for x, k in zip(t, sel) if k], y=v[sel], mode="lines", name=name,
+                                     line=dict(color=col, width=2, dash=dash), hoverinfo="skip"))
+    if measured:
+        fig.add_trace(go.Scatter(
+            x=[m["datetime"] for m in measured], y=[m["sep"] for m in measured], mode="markers",
+            name="measured on a photo with both", text=[m["label"] for m in measured],
+            marker=dict(size=10, color=INK, line=dict(width=1.5, color="#1a1a19")),
+            error_y=dict(type="data", array=[m["err"] for m in measured], color=INK, thickness=1.2, width=0),
+            hovertemplate="%{text}<br>%{x}<br>%{y:.1f}″<extra></extra>"))
+    if today:
+        fig.add_vline(x=today, line=dict(color=INK2, dash="dot", width=1))
+    return _chart_layout(fig, unit_note, "Distance between A and B (″)", height=380)
+
+
 def class_fig(prob: dict, names: dict):
     """How strongly the evidence points to each kind of object (horizontal bars, best first)."""
     order = sorted(prob, key=prob.get)

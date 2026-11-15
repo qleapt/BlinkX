@@ -503,12 +503,19 @@ fut_survey = (_bg.submit(catalogs.survey_frames, round(ra0, 5), round(dec0, 5), 
               if ss.survey and ss.mode in ("blink", "sub", "motion") else None)
 _bg.shutdown(wait=False)
 
-def waiting(t0, what=""):
+def waiting(t0, what="", search=False):
     """Plain words for the loading card: how long we have waited, and why when it is long (the time left is the
-    countdown above it)."""
+    countdown above it). search: the archive search, which says so after 8 s."""
     el = time.time() - t0
-    return what + f"{el:.0f} s so far" + (" · NASA's servers or the connection are slow right now: it keeps trying, "
-                                          "and whatever arrives is saved, so the next visit is fast" if el > 12 else "")
+    if search and el > 8:
+        why = (" · NASA's archive is not answering quickly right now: both of its search services are being asked, "
+               "the first answer wins")
+    elif el > 12:
+        why = (" · NASA's servers or the connection are slow right now: it keeps trying, and whatever arrives is "
+               "saved, so the next visit is fast")
+    else:
+        why = ""
+    return what + f"{el:.0f} s so far" + why
 
 
 _searched = archive.is_cached(round(ra0, 4), round(dec0, 4))
@@ -530,7 +537,7 @@ try:
         except FutureTimeout:
             _el = time.time() - _t_search
             _sl = load.est.step_left("search", _el)
-            load.progress(min(0.95, _el / (_el + _sl)) if _sl is not None else 0.95, waiting(_t_search),
+            load.progress(min(0.95, _el / (_el + _sl)) if _sl is not None else 0.95, waiting(_t_search, search=True),
                           left=None if _sl is None else _sl + load.est.usual("fetch"))
 except archive.ArchiveBusy:
     load.done(arrive=False)
@@ -876,12 +883,13 @@ def view_data(shown_frames, b, n_all, n_sphx, diverging=False, key_extra="", sta
     return data, f"{tgt.name}|{ss.fov}|{b}|{key_extra}", first_sphx
 
 
-def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None, follow=None):
+def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None, follow=None, wkey=None):
     """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts).
-    stars / changes: results of the optional helpers (None while they are switched off)."""
+    stars / changes: results of the optional helpers (None while they are switched off). wkey: a second viewer on
+    the same page (object B of a comparison) needs a key of its own."""
     data, store, first_sphx = view_data(shown_frames, band, len(frames), len(sphx_frames), diverging, key_extra,
                                         stars, changes, follow)
-    res = viewer.show(data, key=f"viewer|{ss.mode}", store_key=store,
+    res = viewer.show(data, key=wkey or f"viewer|{ss.mode}", store_key=store,
                       settings=dict(stretch=ss.stretch, speed=ss.speed, gaia=False, flags=ss.showflags, lang=ss.lang,
                                     a=first_sphx))
     if isinstance(res, dict) and res.get("key") == "spx-measure:" + store:
@@ -934,8 +942,8 @@ def pending_notes():
     watch()
 
 
-def _go_track(marks):
-    ss["find"] = dict(marks=marks, field=tgt.name)
+def _go_track(marks, marks_b=None):
+    ss["find"] = dict(marks=marks, marks_b=marks_b or [], field=tgt.name)
     ss["mode"] = "motion"
 
 
@@ -957,16 +965,34 @@ def check_my_find(marks, key):
             st.button("Spectrum of mark #1", on_click=_go_spectrum, args=(marks[0],), key=f"find_sp|{key}",
                       help="Measures the marked object's brightness at every infrared colour SPHEREx sees.")
             return
-        pick = st.multiselect("Marks of one object (all of them are compared together)", range(len(marks)),
-                              default=list(range(len(marks))), format_func=fmt, key=f"find_pick|{key}|{len(marks)}",
+        # your marks sorted into objects (marks on one photo are different objects); only a first guess to change
+        groups = motion.group_marks(marks)
+        two = len(groups) >= 2 and all(len({marks[i].get("uid") or round(marks[i]["mjd"] * 86400) for i in g}) >= 2
+                                       for g in groups[:2])
+        pick = st.multiselect("Marks of object A (all of them are fitted together)", range(len(marks)),
+                              default=groups[0] if two else list(range(len(marks))), format_func=fmt,
+                              key=f"find_pick|{key}|{len(marks)}",
                               help="Keep the marks you made on the same object, on different photos. Leave out marks "
                                    "of other objects. Three or more marks let the app check that they lie on one "
                                    "path and spot a mark that does not belong.")
+        pick_b = st.multiselect("Marks of object B, to compare with A (optional)",
+                                [i for i in range(len(marks)) if i not in pick],
+                                default=[i for i in groups[1] if i not in pick] if two else [], format_func=fmt,
+                                key=f"find_pick_b|{key}|{len(marks)}",
+                                help="Mark a second object on the same photos (for example a star next to an "
+                                     "asteroid, on two exposures minutes apart) and put its marks here. Both get "
+                                     "their own motion check, and the app compares them: their distance on each "
+                                     "photo, how fast they move relative to each other, whether they drift apart or "
+                                     "close in, and how far apart they will be.")
         sel = [dict(marks[i], label=f"#{i + 1}") for i in sorted(pick)]
-        n_photos = len({m.get("uid") or round(m["mjd"] * 86400) for m in sel})   # exposures can be minutes apart
+        sel_b = [dict(marks[i], label=f"#{i + 1}") for i in sorted(pick_b)]
+        photos = lambda ms: len({m.get("uid") or round(m["mjd"] * 86400) for m in ms})   # noqa: E731
+        n_photos = photos(sel)   # exposures can be minutes apart
         b1, b2 = st.columns(2)
-        b1.button(f"Analyse the motion of these {len(sel)} marks", type="primary", on_click=_go_track, args=(sel,),
-                  key=f"find_go|{key}", use_container_width=True, disabled=n_photos < 2,
+        b1.button(f"Analyse and compare A ({len(sel)} marks) and B ({len(sel_b)} marks)" if sel_b else
+                  f"Analyse the motion of these {len(sel)} marks", type="primary", on_click=_go_track,
+                  args=(sel, sel_b), key=f"find_go|{key}", use_container_width=True,
+                  disabled=n_photos < 2 or (bool(sel_b) and photos(sel_b) < 2),
                   help="Fits one path through all the marks at once, tests whether the object stands still, drifts "
                        "like a star (with or without the yearly parallax wobble) or curves like an asteroid, says "
                        "what kind of object it probably is and why, and predicts where it will be in the coming "
@@ -976,6 +1002,8 @@ def check_my_find(marks, key):
                   help="Measures the marked object's brightness at every infrared colour SPHEREx sees.")
         if n_photos < 2:
             st.caption("These marks are all on the same photo: pick marks made on at least two different photos.")
+        elif sel_b and photos(sel_b) < 2:
+            st.caption("Object B needs marks on at least two different photos too.")
 
 
 def motion_check(t, note=""):
@@ -1426,9 +1454,10 @@ def found_rows(fit0, used):
     return out
 
 
-def track_check(marks):
-    """Motion of one object from every mark the user made of it, each measured on its own photo, fitted together."""
-    st.subheader(f"Motion of your {len(marks)} marks ({band})")
+def object_check(marks, key="a", title=None, name="Your find"):
+    """Motion of one object from every mark the user made of it, each measured on its own photo, fitted together.
+    Returns (fit, positions) for a comparison, or None when there are not enough marks."""
+    st.subheader(title or f"Motion of your {len(marks)} marks ({band})")
     rows, missing = [], []
     for i, m in enumerate(sorted(marks, key=lambda m: m["mjd"])):
         m = dict(m, label=m.get("label") or f"#{i + 1}")
@@ -1443,7 +1472,7 @@ def track_check(marks):
     if len({viewer.photo_uid(r["f"]) for r in rows}) < 2:
         st.warning("At least two of the marks must be on different photos of this view. Go back and mark the "
                    "object on two or more dates.")
-        return
+        return None
 
     def measure(rs):
         for r in rs:
@@ -1460,7 +1489,7 @@ def track_check(marks):
         return rs
 
     rows = measure(rows)
-    rec = st.toggle("Also measure it on the other photos, at the spot your marks predict", key=f"rec|{tgt.name}",
+    rec = st.toggle("Also measure it on the other photos, at the spot your marks predict", key=f"rec|{tgt.name}|{key}",
                     help="Off by default: the app does not look for things by itself. When on, the path through your "
                          "marks predicts where the object should be on every other photo of this view; where a clear "
                          "spot sits there (5σ, within the prediction's uncertainty), it is measured and added "
@@ -1499,32 +1528,96 @@ def track_check(marks):
                + i18n.tr(gaia_note, ss.lang))
     verdict_block(fit, cls)
     cat = catalogs.as_target(gaia["star"], name=f"Gaia DR3 {gaia['id']}") if isinstance(gaia, dict) else None
-    future_section(fit, cls, obs, key=f"find|{tgt.name}", cat_target=cat)
+    future_section(fit, cls, obs, key=f"find|{tgt.name}|{key}", cat_target=cat)
     details_block(fit, obs)
     st.dataframe(pd.DataFrame([{"Mark": r["obs"].label, "Photo": r["f"].label,
                                 "RA (°)": round(r["obs"].ra, 6), "Dec (°)": round(r["obs"].dec, 6),
                                 "± (″)": round(r["obs"].err, 2),
                                 "Seen in single exposures": "–" if r["seen"] is None else f"{r['seen'] * 100:.0f}%"}
                                for r in rows]), hide_index=True, use_container_width=True)
-    follow = fit.as_target("Your find")
+    follow = fit.as_target(name)
     with st.expander("Watch it move: every photo with the predicted spot (orange ring)"):
         show = frames if days >= 5 else list({id(r["f"]): r["f"] for r in rows}.values())
-        sky_viewer(show, key_extra="track", follow=follow)
+        sky_viewer(show, key_extra=f"track|{key}", follow=follow, wkey=None if key == "a" else f"viewer|{ss.mode}|{key}")
         st.caption("The orange ring follows the path fitted through your marks, also on the photos you did not "
                    "mark: if the object sits in the ring there too, the prediction works.")
+    return fit, obs
+
+
+def track_check(marks, marks_b=None):
+    """Your marks' motion check; with a second object's marks, both checks and the two compared. The progress bar
+    stays up until all of it is worked out."""
+    t0 = time.time()
+    usual = load.est.usual("motion") * (2 if marks_b else 1)
+    load.step("Measuring your marks…", "Each mark on the photo it was made on", 4, left=usual)
+    if not marks_b:
+        object_check(marks)
+        load.done()
+        return
+    top = st.container()
+    ta, tb = st.tabs([f"Object A: its motion check ({len(marks)} marks)",
+                      f"Object B: its motion check ({len(marks_b)} marks)"])
+    with ta:
+        res_a = object_check(marks, "a", f"Object A: {len(marks)} marks ({band})", "Object A")
+    load.progress(0.5, "Object A done", left=max(0.1, usual - (time.time() - t0)))
+    with tb:
+        res_b = object_check(marks_b, "b", f"Object B: {len(marks_b)} marks ({band})", "Object B")
+    load.step("Comparing the two objects…", "Their distance on each photo and how they move relative to each other",
+              5, left=0.2)
+    with top:
+        compare_block(res_a, res_b)
+    load.est.learn_step("motion", (time.time() - t0) / 2)
+    load.done()
+
+
+def compare_block(res_a, res_b):
+    """Object B against object A: distance, relative motion, apart or closer, and where it goes."""
+    st.subheader("Object A and object B compared")
+    if res_a is None or res_b is None:
+        st.info("Both objects need marks on at least two different photos of this view to be compared.")
+        return
+    (fa, oa), (fb, ob) = res_a, res_b
+    c = motion.compare(fa, fb, oa, ob)
+    u = lambda x: f"{x / c.per:.2f}{c.unit}"   # noqa: E731
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Distance at the last mark", f"{c.sep_now:.1f}″",
+              help="How far apart A and B are on the sky at the last date you marked, along their fitted paths. "
+                   "1″ is an arcsecond; a SPHEREx pixel is 6.15″.")
+    m2.metric("B's speed relative to A", u(c.rel), f"± {u(c.rel_err)} · toward the {c.way}", delta_color="off",
+              help="B's motion minus A's motion: how fast B moves as seen from A. The ± is the uncertainty (1σ).")
+    m3.metric("Drifting apart" if c.rate >= 0 else "Closing in", u(abs(c.rate)),
+              f"{abs(c.rate) / c.rate_err:.1f} σ" if c.rate_err > 0 and np.isfinite(c.rate_err) else None,
+              delta_color="off",
+              help="How fast their distance grows (apart) or shrinks (closing in). Below about 3σ the change is "
+                   "within the measuring error.")
+    st.markdown("\n".join(f"- {i18n.tr(s, ss.lang)}" for s in motion.comparison_text(c)))
+    iso = lambda m: Time(m, format="mjd").iso[:19]   # noqa: E731
+    path = dict(datetime=[iso(m) for m in c.path["mjd"]], sep=c.path["sep"], se=c.path["se"],
+                future=c.path["future"])
+    pts = [dict(datetime=iso(s["mjd"]), sep=s["sep"], err=s["err"], label=f"A {s['la']} · B {s['lb']}")
+           for s in c.shared]
+    st.plotly_chart(render.separation_fig(path, pts, today=iso(c.t_now)), use_container_width=True)
+    st.caption("The line is the distance between the two fitted paths (dashed: predicted after your last mark, with "
+               "its uncertainty); the white points are the distances measured on the photos where you marked both.")
+    if c.shared:
+        st.dataframe(pd.DataFrame([{"Photo date": iso(s["mjd"]), "Mark of A": s["la"], "Mark of B": s["lb"],
+                                    "B east of A (″)": round(s["de"], 2), "B north of A (″)": round(s["dn"], 2),
+                                    "Distance (″)": round(s["sep"], 2), "± (″)": round(s["err"], 2),
+                                    "B is to the": s["way"]} for s in c.shared]),
+                     hide_index=True, use_container_width=True)
 
 
 if ss.mode == "motion":
     f_ = ss.get("find") or {}
-    if (f_.get("field") == tgt.name and f_.get("marks")) or tgt.source == "coordinates":
+    if tgt.source == "coordinates" and not (f_.get("field") == tgt.name and f_.get("marks")):
         load_secs = load.done()
-    else:   # the bar stays up through the analysis: motion_check closes it
+    else:   # the bar stays up through the analysis: motion_check / track_check close it
         load_secs = time.time() - load.t0
     prefetch.start(tgt, ra0, dec0, ss.fov, band, exps, survey=fut_survey is not None)   # the other bands, ahead
     if f_.get("field") == tgt.name and f_.get("marks"):
         st.button(f"Back to {tgt.name}" if tgt.source != "coordinates" else "Back", on_click=_drop_find,
                   help="Forget these marks and show the usual motion check.")
-        track_check(f_["marks"])
+        track_check(f_["marks"], f_.get("marks_b"))
         st.stop()
     if tgt.source == "coordinates":
         st.subheader(f"Motion check at {tgt.name} ({band})")
