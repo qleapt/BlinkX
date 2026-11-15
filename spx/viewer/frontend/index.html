@@ -1,78 +1,131 @@
-<!doctype html><html><head><meta charset="utf-8"><title>SPHEREx sky viewer</title><style>
-:root{--bg:#0b0e16;--panel:#151a26;--line:#2a3142;--ink:#e8eaf0;--ink2:#9aa3b5;--acc:#ffb000;--blue:#38d0ff}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
-.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px}
-button,select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font:inherit;font-size:13px;cursor:pointer}
-button:hover,select:hover{border-color:#4a5163}button.on{background:#2b2410;border-color:var(--acc);color:#ffd27a}
-button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
-.sep{width:1px;height:22px;background:var(--line);margin:0 3px}
-.lab{color:var(--ink2);font-size:12px}
-label.ck{display:inline-flex;gap:4px;align-items:center;color:var(--ink2);font-size:12.5px;cursor:pointer}
-input[type=range]{width:96px;accent-color:var(--acc)}
-.wrap{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SPHEREx sky viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* deep-space navy, launch blue (same tokens as spx/theme.py); amber stays for your marks and the target on the image */
+:root{--bg:#050a17;--panel:#0b1630;--panel2:#0e1a36;--panel3:#13254d;--line:#1d2d52;--line2:#2a4275;--ink:#e8eefb;--ink2:#a3b3d1;--ink3:#7d8db0;
+  --blue:#2b8cff;--blue-hi:#5fb0ff;--blue-deep:#1f6fe0;--acc:#ffb000;--cyan:#38d0ff;--warn:#ff8a8a;
+  --font:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent;color:var(--ink);font:14px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+body{padding:2px 2px 6px}
+::selection{background:rgba(43,140,255,.38);color:#fff}
+input{caret-color:var(--blue-hi)}
+*{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.side,.row,.small,#sizes{font-variant-numeric:tabular-nums}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:9px}
+button,select{height:34px;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:0 13px;
+  font:500 13px/1 var(--font);cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease}
+button:hover,select:hover{background:var(--panel3);border-color:rgba(95,176,255,.55)}
+button:active{transform:translateY(1px)}
+button.on{background:var(--blue-deep);border-color:var(--blue);color:#fff;box-shadow:0 3px 10px rgba(31,111,224,.35)}
+button:disabled,select:disabled{opacity:.45;cursor:not-allowed}
+select{appearance:none;-webkit-appearance:none;padding-right:30px;max-width:300px;text-overflow:ellipsis;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a3b3d1' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center}
+select option{background:#0b1630;color:var(--ink)}
+#selA,#selB{max-width:220px}
+button:focus-visible,select:focus-visible,input:focus-visible,.qm:focus-visible,.cards figure:focus-visible{outline:2px solid var(--blue-hi);outline-offset:2px}
+.grp{display:inline-flex;gap:4px;padding:3px;background:rgba(11,22,48,.7);border:1px solid var(--line);border-radius:11px}
+.grp button{height:28px;border-color:transparent;background:transparent;padding:0 12px}
+.grp button:hover{background:var(--panel3);border-color:transparent}
+.grp button.on{background:var(--blue-deep);border-color:var(--blue)}
+.pair{display:inline-flex;align-items:center;gap:7px}
+.sep{width:1px;height:24px;background:var(--line);margin:0 2px}
+.lab{color:var(--ink2);font-size:12.5px;font-weight:500}
+label.ck{display:inline-flex;gap:7px;align-items:center;color:var(--ink2);font-size:13px;cursor:pointer;padding:3px 2px;user-select:none;transition:color .15s ease}
+label.ck:hover{color:var(--ink)}
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:17px;height:17px;margin:0;border-radius:5px;border:1.5px solid var(--line2);
+  background:var(--panel2);cursor:pointer;display:inline-grid;place-content:center;transition:background-color .15s ease,border-color .15s ease}
+input[type=checkbox]::after{content:"";width:9px;height:5px;border:2px solid #fff;border-top:0;border-right:0;transform:rotate(-45deg) translate(1px,-1px);opacity:0}
+input[type=checkbox]:checked{background:var(--blue);border-color:var(--blue)}
+input[type=checkbox]:checked::after{opacity:1}
+input[type=range]{width:88px;accent-color:var(--blue);cursor:pointer;height:20px}
+.wrap{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
 .stage{position:relative;flex:0 0 auto}
-.cvs{display:flex;gap:6px}
-canvas.view{display:block;border-radius:8px;background:#000;cursor:crosshair;touch-action:none}
-.title{font-size:12.5px;color:var(--ink);margin:2px 0 4px;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.title .w{color:#ff8a8a}
-.read{font:12px ui-monospace,Consolas,monospace;color:var(--ink2);margin-top:5px;min-height:18px}
-.tl{position:relative;height:34px;margin:6px 4px 0;user-select:none}
-.tl .axis{position:absolute;left:0;right:0;top:12px;height:2px;background:var(--line)}
-.tl .t{position:absolute;top:5px;width:10px;height:16px;margin-left:-5px;border-radius:3px;background:#3a4258;cursor:pointer;border:0;padding:0}
-.tl .t.sur{background:#5a4a2a}.tl .t.cur{background:var(--acc)}
-.tl .t .ab{position:absolute;top:-13px;left:0;width:10px;text-align:center;font-size:10px;font-weight:700;color:var(--blue)}
-.tl .brk{position:absolute;top:6px;font-size:12px;color:var(--ink2);margin-left:-5px}
-.tl .yr{position:absolute;top:21px;font-size:10.5px;color:var(--ink2);transform:translateX(-50%);white-space:nowrap}
-.key{display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:12.5px;margin-top:6px}
-.key .grad{width:160px;height:10px;border-radius:3px;background:linear-gradient(90deg,#2166ac,#67a9cf,#f7f7f7,#ef8a62,#b2182b)}
-.side{flex:1 1 250px;min-width:230px;max-height:640px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
-.side h4{margin:11px 0 4px;font-size:11.5px;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em}
-.tip{background:#1d2230;border-left:3px solid var(--blue);padding:6px 8px;border-radius:6px;color:#cdd3df;font-size:12.5px}
+.cvs{display:flex;gap:8px}
+canvas.view{display:block;border-radius:12px;background:#000;cursor:crosshair;touch-action:none;
+  box-shadow:0 0 0 1px var(--line),0 12px 40px rgba(0,0,0,.45)}
+.title{font-size:13px;font-weight:500;color:var(--ink);margin:0 0 7px;min-height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title .w{color:var(--warn)}
+.read{font:12.5px/1.5 var(--font);color:var(--ink2);margin-top:6px;min-height:19px;font-variant-numeric:tabular-nums}
+.tl{position:relative;height:36px;margin:8px 6px 0;user-select:none}
+.tl .axis{position:absolute;left:0;right:0;top:12px;height:2px;border-radius:1px;background:var(--line)}
+.tl .t{position:absolute;top:4px;width:12px;height:18px;margin-left:-6px;border-radius:4px;background:var(--line2);cursor:pointer;border:0;padding:0;
+  transition:background-color .15s ease,transform .15s ease}
+.tl .t:hover{background:var(--blue-hi);transform:scaleY(1.12)}
+.tl .t.sur{background:#6b5a3a}.tl .t.cur{background:var(--blue);box-shadow:0 2px 6px rgba(43,140,255,.55)}
+.tl .t .ab{position:absolute;top:-14px;left:0;width:12px;text-align:center;font-size:10px;font-weight:700;color:var(--blue-hi)}
+.tl .brk{position:absolute;top:5px;font-size:12px;color:var(--ink3);margin-left:-5px}
+.tl .yr{position:absolute;top:23px;font-size:10.5px;color:var(--ink3);transform:translateX(-50%);white-space:nowrap}
+.key{display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:12.5px;margin-top:7px;color:var(--ink2)}
+.key .grad{width:160px;height:10px;border-radius:5px;background:linear-gradient(90deg,#2166ac,#67a9cf,#f7f7f7,#ef8a62,#b2182b)}
+.side{flex:1 1 300px;min-width:260px;max-height:760px;overflow:auto;background:linear-gradient(180deg,rgba(13,26,56,.92),rgba(8,17,39,.92));
+  border:1px solid var(--line);border-radius:14px;padding:14px 16px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.side h4{display:flex;align-items:center;gap:8px;margin:16px 0 6px;font-size:11.5px;font-weight:600;color:#c9d6f0;text-transform:uppercase;letter-spacing:.06em}
+.side h4 svg{flex:0 0 auto;color:var(--blue-hi)}
+.tip{background:rgba(43,140,255,.09);border:1px solid rgba(43,140,255,.26);padding:10px 12px;border-radius:10px;color:#d5def0;font-size:12.5px;line-height:1.5}
+.tip b{color:#fff}
 .empty{color:var(--ink2);font-style:italic;font-size:12.5px}
-.row{padding:4px 0;border-bottom:1px dashed #262b37;font-size:12.5px}.row b{color:var(--acc)} .m{color:var(--blue)}
-.small{color:var(--ink2);font-size:11.5px}
-input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit}
-.k{display:inline-block;min-width:1.4em;text-align:center;border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11px;color:var(--ink2)}
-.hov{position:absolute;pointer-events:none;background:rgba(10,13,22,.92);border:1px solid #33405a;border-radius:6px;padding:4px 7px;font-size:12px;color:#dfe6f3;max-width:260px;display:none;z-index:3}
-.cards{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
-.cards figure{margin:0;text-align:center;font-size:10.5px;color:var(--ink2);cursor:pointer;position:relative}
-.cards canvas{display:block;border-radius:4px;background:#000;image-rendering:pixelated;width:60px;height:60px}
+.row{padding:6px 0;border-bottom:1px solid rgba(29,45,82,.7);font-size:12.5px}.row:last-child{border-bottom:0}
+.row b{color:var(--acc)} .m{color:var(--cyan)}
+.small{color:var(--ink2);font-size:12px}
+input[type=number]{width:90px;height:32px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:0 9px;font:inherit}
+input[type=number]:focus{border-color:var(--blue);outline:none;box-shadow:0 0 0 3px rgba(43,140,255,.18)}
+.dist{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.dist select{height:32px}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px}
+.acts button svg{color:var(--ink2)}
+.k{display:inline-block;min-width:1.5em;text-align:center;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:0 4px;font:11px/1.5 var(--mono);color:var(--ink);background:var(--panel2)}
+.keys{margin:12px 0 0;line-height:1.9}
+.hov{position:absolute;pointer-events:none;background:rgba(8,17,39,.94);border:1px solid var(--line2);border-radius:8px;padding:5px 8px;font-size:12px;color:#dfe6f3;
+  max-width:260px;display:none;z-index:3;box-shadow:0 8px 24px rgba(0,0,0,.45);backdrop-filter:blur(4px)}
+.cards{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.cards figure{margin:0;text-align:center;font-size:10.5px;color:var(--ink2);cursor:pointer;position:relative;border-radius:6px}
+.cards figure:hover canvas:first-child{box-shadow:0 0 0 2px var(--blue)}
+.cards canvas{display:block;border-radius:6px;background:#000;image-rendering:pixelated;width:60px;height:60px}
 .cards .x{position:absolute;left:0;top:0;pointer-events:none;background:transparent}
 .qwrap{position:relative;display:inline-flex;align-items:center}
-.qm{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:3px;border-radius:50%;
-  border:1px solid #4a5163;color:var(--ink2);font-size:11.5px;font-weight:700;cursor:help;user-select:none}
-.qm:hover,.qm:focus-visible,.qwrap.open .qm{border-color:var(--blue);color:var(--blue);outline:none}
-.pop{display:none;position:absolute;top:26px;left:-120px;width:min(380px,92vw);z-index:6;background:#121725;border:1px solid #33405a;
-  border-radius:9px;padding:9px 11px;color:#d7dce7;font-size:12.5px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.qm{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-left:2px;border-radius:50%;
+  border:1px solid var(--line2);color:var(--ink2);font-size:11.5px;font-weight:700;cursor:help;user-select:none;transition:color .15s ease,border-color .15s ease}
+.qm:hover,.qwrap.open .qm{border-color:var(--blue-hi);color:var(--blue-hi);outline:none}
+.pop{display:none;position:absolute;top:28px;left:0;width:min(380px,calc(100vw - 16px));z-index:6;background:#0b1630;border:1px solid var(--line2);
+  border-radius:12px;padding:11px 13px;color:#d7dce7;font-size:12.5px;line-height:1.5;box-shadow:0 14px 40px rgba(0,0,0,.55)}
 .qwrap.open .pop{display:block}
 .pop p{margin:0 0 6px}.pop ul{margin:0 0 6px;padding-left:16px}.pop li{margin:2px 0}.pop canvas{display:block;margin-top:4px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style></head><body>
 <div class="bar" role="toolbar" aria-label="Viewer tools">
+  <span class="grp" role="group" aria-label="Tool">
   <button id="tLook" title="Move the mouse to read positions; drag to move around a zoomed image (key V)">Look</button>
   <button id="tMark" title="Click on anything to put a numbered marker on it (key M)">Mark</button>
   <button id="tRuler" title="Click where a line starts and where it ends: shows its length on the sky (key L)">Measure</button>
+  </span>
   <span class="sep"></span>
-  <span class="lab">Compare</span>
-  <select id="cmp" title="How to compare the dates">
+  <span class="pair"><span class="lab">Compare</span>
+  <select id="cmp" title="How to compare the dates" aria-label="Compare">
     <option value="all">All dates (play)</option><option value="ab">Blink A ↔ B</option>
     <option value="side">Side by side A | B</option><option value="swipe">Swipe A / B</option>
-    <option value="diff">Difference B − A</option></select>
-  <span class="lab">A</span><select id="selA" title="Photo A (the 'before')"></select>
-  <span class="lab">B</span><select id="selB" title="Photo B (the 'after')"></select>
+    <option value="diff">Difference B − A</option></select></span>
+  <span class="pair"><span class="lab">A</span><select id="selA" title="Photo A (the 'before')" aria-label="Photo A"></select></span>
+  <span class="pair"><span class="lab">B</span><select id="selB" title="Photo B (the 'after')" aria-label="Photo B"></select></span>
 </div>
 <div class="bar">
+  <span class="grp" role="group" aria-label="Photos">
   <button id="prev" title="Previous photo (key ←)">Prev</button>
   <button id="play" title="Flip through the photos automatically (Space)">Play</button>
   <button id="next" title="Next photo (key →)">Next</button>
-  <span class="lab" title="Time each photo stays on screen while playing">Speed</span>
-  <input type="range" id="speed" min="150" max="2000" step="50" title="Milliseconds per photo while playing">
+  </span>
+  <span class="pair"><span class="lab" title="Time each photo stays on screen while playing">Speed</span>
+  <input type="range" id="speed" min="150" max="2000" step="50" title="Milliseconds per photo while playing" aria-label="Speed"></span>
   <label class="ck" title="Blend smoothly from one photo to the next instead of a hard flip"><input type="checkbox" id="fade"> Cross-fade</label>
   <span class="sep"></span>
-  <select id="stretch" title="Brightness scale (see the ? next to it)">
+  <span class="pair"><select id="stretch" title="Brightness scale (see the ? next to it)" aria-label="Brightness scale">
     <option value="asinh">asinh</option><option value="log">log</option><option value="sqrt">sqrt</option><option value="linear">linear</option></select>
-  <span class="qwrap" id="qStretch"><span class="qm" tabindex="0" role="button" aria-label="What the brightness scales do">?</span><div class="pop" role="tooltip"></div></span>
-  <span class="lab" title="Darkest level: raise it to hide noisy background">Dark</span><input type="range" id="blk" min="0" max="60" step="0.5" title="Dark level (percentile of all pixels shown as black)">
-  <span class="lab" title="Brightest level: lower it to bring out faint things">Bright</span><input type="range" id="wht" min="90" max="100" step="0.05" title="Bright level (percentile of all pixels shown as white)">
+  <span class="qwrap" id="qStretch"><span class="qm" tabindex="0" role="button" aria-label="What the brightness scales do">?</span><div class="pop" role="tooltip"></div></span></span>
+  <span class="pair"><span class="lab" title="Darkest level: raise it to hide noisy background">Dark</span><input type="range" id="blk" min="0" max="60" step="0.5" title="Dark level (percentile of all pixels shown as black)" aria-label="Dark"></span>
+  <span class="pair"><span class="lab" title="Brightest level: lower it to bring out faint things">Bright</span><input type="range" id="wht" min="90" max="100" step="0.05" title="Bright level (percentile of all pixels shown as white)" aria-label="Bright"></span>
   <button id="zreset" title="Show the whole image again (key 0)">Fit</button>
 </div>
 <div class="bar">
@@ -91,23 +144,26 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
     <div class="hov" id="hov"></div>
     <div class="tl" id="tl" aria-label="Timeline of the photos"></div>
     <div class="key" id="key" style="display:none"><span>Blue = was brighter before (A)</span><span class="grad"></span><span>Red = brighter now (B)</span><span class="small">white / grey = no change</span></div>
-    <div class="read" id="read">Move the mouse over the image to read the sky position and brightness.</div>
+    <div class="read" id="read" aria-live="off">Move the mouse over the image to read the sky position and brightness.</div>
   </div>
-  <div class="side">
+  <div class="side" id="side">
     <div class="tip" id="tip"></div>
-    <h4>Marked objects</h4><div id="marks"></div>
-    <h4>Your marks, each on its own photo</h4><div id="card" class="small"></div>
-    <h4>Distances between marks</h4><div id="pairs"></div>
-    <h4>Measured lines</h4><div id="lines"></div>
-    <h4>Real size (optional)</h4>
+    <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Marked objects</h4><div id="marks"></div>
+    <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.5"/></svg>Your marks, each on its own photo</h4><div id="card" class="small"></div>
+    <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>Distances between marks</h4><div id="pairs"></div>
+    <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17L17 4l3 3L7 20z"/><path d="M8 13l2 2M11 10l2 2M14 7l2 2"/></svg>Measured lines</h4><div id="lines"></div>
+    <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>Real size (optional)</h4>
     <div class="small">If you know the distance, the angle gives a real size: size in AU (Earth–Sun distances) = angle in ″ × distance in parsecs.</div>
-    <div style="margin-top:5px">Distance <input type="number" id="dist" min="0" step="any" placeholder="e.g. 1.8">
+    <div class="dist"><span class="lab">Distance</span> <input type="number" id="dist" min="0" step="any" placeholder="e.g. 1.8" aria-label="Distance">
       <select id="dunit" aria-label="Distance unit"><option value="pc">parsecs</option><option value="ly">light-years</option></select></div>
-    <div id="sizes" class="small" style="margin-top:5px"></div>
-    <h4>Save</h4><button id="csv" title="Download your marks and lines as a spreadsheet (CSV) file">Download CSV</button>
-    <button id="undo" title="Remove the last marker or line (key Z)">Undo</button>
-    <button id="clear" title="Remove all markers and lines">Clear</button>
-    <p class="small">Keys: <span class="k">←</span><span class="k">→</span> photos · <span class="k">Space</span> play · <span class="k">M</span> mark · <span class="k">L</span> line · <span class="k">V</span> look · <span class="k">Z</span> undo · wheel = zoom · drag = move · <span class="k">0</span> fit.<br>
+    <div id="sizes" class="small" style="margin-top:6px"></div>
+    <h4><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Save</h4>
+    <div class="acts">
+    <button id="csv" title="Download your marks and lines as a spreadsheet (CSV) file"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download CSV</button>
+    <button id="undo" title="Remove the last marker or line (key Z)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>Undo</button>
+    <button id="clear" title="Remove all markers and lines"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Clear</button>
+    </div>
+    <p class="small keys">Keys: <span class="k">←</span> <span class="k">→</span> photos · <span class="k">Space</span> play · <span class="k">M</span> mark · <span class="k">L</span> line · <span class="k">V</span> look · <span class="k">Z</span> undo · wheel = zoom · drag = move · <span class="k">0</span> fit.<br>
     1′ = 60″; one SPHEREx pixel is 6.15″, so a hand-placed mark is good to about one pixel; “Snap” does better on stars.</p>
   </div>
 </div>
@@ -247,6 +303,7 @@ if (window.ResizeObserver) new ResizeObserver(setHeight).observe(document.body);
 
 const $ = id => document.getElementById(id);
 const c1 = $("c1"), c2 = $("c2"), g1 = c1.getContext("2d"), g2 = c2.getContext("2d");
+c1.W = c1.H = c2.W = c2.H = 300; c1.S = c2.S = 1;   // css size (W, H) and backing-store scale (S) of each view
 let D = null, SIG = "", OVS = "", KEY = "", N = 0, vals = [], flg = [], ready = [], renders = [], diffC = null, diffKey = "";
 let cur = 0, A = 0, B = 0, tool = "mark", marks = [], lines = [], pending = null, hover = null, timer = null;
 let view = {z: 1, vx: 0, vy: 0}, swipeX = 0.5, fadeFrom = -1, fadeT0 = 0, sample = null, ver = 0, sendT = null;
@@ -391,10 +448,10 @@ function diffCanvas() {
 }
 
 // ---------- geometry ----------
-const K = cv => cv.width / D.nx * view.z;
-const toImg = (cv, sx, sy) => ({x: view.vx + (sx - cv.width / 2) / K(cv), y: view.vy - (sy - cv.height / 2) / K(cv)});
-const toScr = (cv, p) => ({x: cv.width / 2 + (p.x - view.vx) * K(cv), y: cv.height / 2 - (p.y - view.vy) * K(cv)});
-function evImg(cv, ev) { const r = cv.getBoundingClientRect(); return toImg(cv, (ev.clientX - r.left) * cv.width / r.width, (ev.clientY - r.top) * cv.height / r.height); }
+const K = cv => cv.W / D.nx * view.z;
+const toImg = (cv, sx, sy) => ({x: view.vx + (sx - cv.W / 2) / K(cv), y: view.vy - (sy - cv.H / 2) / K(cv)});
+const toScr = (cv, p) => ({x: cv.W / 2 + (p.x - view.vx) * K(cv), y: cv.H / 2 - (p.y - view.vy) * K(cv)});
+function evImg(cv, ev) { const r = cv.getBoundingClientRect(); return toImg(cv, (ev.clientX - r.left) * cv.W / r.width, (ev.clientY - r.top) * cv.H / r.height); }
 function clampView() { const hx = (D.nx / 2) / view.z, hy = (D.ny / 2) / view.z;
   view.vx = Math.max(hx - 0.5, Math.min(D.nx - 0.5 - hx, view.vx)); view.vy = Math.max(hy - 0.5, Math.min(D.ny - 0.5 - hy, view.vy)); }
 function sky(p) { const e = -(p.x - D.cx) * D.scale, n = (p.y - D.cy) * D.scale;
@@ -409,7 +466,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", 
 function valAt(i, x, y) { x = Math.round(x); y = Math.round(y); if (!vals[i] || x < 0 || y < 0 || x >= D.nx || y >= D.ny) return NaN; return vals[i][y * D.nx + x]; }
 
 function shownIndex() { const m = $("cmp").value; return m === "ab" || m === "all" ? cur : m === "diff" ? -1 : B; }
-function frameUnder(cv) { const m = $("cmp").value; return cv === c2 ? B : m === "side" ? A : m === "swipe" ? (hover && toScr(cv, hover).x < swipeX * cv.width ? A : B) : shownIndex(); }
+function frameUnder(cv) { const m = $("cmp").value; return cv === c2 ? B : m === "side" ? A : m === "swipe" ? (hover && toScr(cv, hover).x < swipeX * cv.W ? A : B) : shownIndex(); }
 function snap(p, i) {   // light-weighted centre of the brightest spot within 3 px, on the photo shown
   if (!$("snap").checked) return p;
   let get;
@@ -426,18 +483,20 @@ function snap(p, i) {   // light-weighted centre of the brightest spot within 3 
 
 // ---------- drawing ----------
 function fit() {
-  if (!D) return; const side = $("cmp").value === "side", W = document.body.clientWidth;
-  const avail = Math.max(260, Math.min(side ? 900 : 620, W - (W > 880 ? 270 : 8)));
-  const w = Math.floor(side ? (avail - 6) / 2 : avail);
-  [c1, c2].forEach(c => { if (c.width !== w) c.width = w; if (c.height !== w) c.height = w; });   // a resize clears it
-  c2.style.display = side ? "block" : "none"; draw(); setHeight();
+  if (!D) return; const side = $("cmp").value === "side", W = document.body.clientWidth, wide = W > 900;
+  const avail = Math.max(260, Math.min(side ? 1040 : 720, W - (wide ? 330 : 8)));
+  const w = Math.floor(side ? (avail - 8) / 2 : avail), dpr = Math.min(3, window.devicePixelRatio || 1), px = Math.round(w * dpr);
+  [c1, c2].forEach(c => { c.W = c.H = w; c.S = px / w; if (c.width !== px) c.width = px; if (c.height !== px) c.height = px;   // a resize clears it
+    c.style.width = c.style.height = w + "px"; });
+  $("stage").style.width = (side ? 2 * w + 8 : w) + "px";   // a long photo title is cut, it never widens the column
+  edgeYears(); c2.style.display = side ? "block" : "none"; $("side").style.maxHeight = wide ? Math.max(420, w + 96) + "px" : "none"; draw(); setHeight();
 }
 function blit(g, cv, src, alpha) { if (!src) return; const k = K(cv), s = toScr(cv, {x: -0.5, y: D.ny - 0.5});
   g.imageSmoothingEnabled = false; g.globalAlpha = alpha === undefined ? 1 : alpha; g.drawImage(src, s.x, s.y, D.nx * k, D.ny * k); g.globalAlpha = 1; }
-function tag(g, text, x) { g.fillStyle = "rgba(0,0,0,.6)"; g.fillRect(x, 0, 24, 20); g.fillStyle = "#38d0ff"; g.font = "bold 13px system-ui"; g.fillText(text, x + 7, 15); }
+function tag(g, text, x) { g.fillStyle = "rgba(5,10,23,.72)"; g.fillRect(x, 0, 24, 20); g.fillStyle = "#5fb0ff"; g.font = "bold 13px Inter, system-ui, sans-serif"; g.fillText(text, x + 7, 15); }
 function overlays(g, cv, i, diverging) {
   const k = K(cv), fr = D.frames[i >= 0 ? i : B];
-  g.lineWidth = 2; g.font = "bold 12px system-ui";
+  g.lineWidth = 2; g.font = "bold 12px Inter, system-ui, sans-serif";
   if ($("oGaia").checked && fr.gaia) { g.strokeStyle = "rgba(56,208,255,.85)"; g.lineWidth = 1.5;
     fr.gaia.forEach(s => { const p = toScr(cv, s); g.beginPath(); g.arc(p.x, p.y, Math.max(5, 1.6 * k), 0, 7); g.stroke(); }); g.lineWidth = 2; }
   if ($("oStars").checked && fr.stars) { g.strokeStyle = "rgba(90,209,154,.9)"; g.lineWidth = 1.5; g.beginPath();
@@ -448,7 +507,7 @@ function overlays(g, cv, i, diverging) {
     if (c.kind === "moved") { g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); const a = Math.atan2(q.y - p.y, q.x - p.x);
       g.moveTo(q.x, q.y); g.lineTo(q.x - 7 * Math.cos(a - 0.5), q.y - 7 * Math.sin(a - 0.5)); g.moveTo(q.x, q.y); g.lineTo(q.x - 7 * Math.cos(a + 0.5), q.y - 7 * Math.sin(a + 0.5)); }
     else g.arc(p.x, p.y, r, 0, 7);
-    g.stroke(); g.font = "bold 11px system-ui"; g.fillText(c.label, (c.kind === "moved" ? q.x : p.x) + r * 0.8, (c.kind === "moved" ? q.y : p.y) + r + 4); });
+    g.stroke(); g.font = "bold 11px Inter, system-ui, sans-serif"; g.fillText(c.label, (c.kind === "moved" ? q.x : p.x) + r * 0.8, (c.kind === "moved" ? q.y : p.y) + r + 4); });
   if ($("oTgt").checked && fr.target) { const t = fr.target, p = toScr(cv, t); g.strokeStyle = "rgba(255,176,0,.9)"; g.beginPath();
     if (t.cross) { const r = 10; g.moveTo(p.x - r, p.y); g.lineTo(p.x - 4, p.y); g.moveTo(p.x + 4, p.y); g.lineTo(p.x + r, p.y);
       g.moveTo(p.x, p.y - r); g.lineTo(p.x, p.y - 4); g.moveTo(p.x, p.y + 4); g.lineTo(p.x, p.y + r); }
@@ -461,7 +520,7 @@ function overlays(g, cv, i, diverging) {
       g.beginPath(); g.arc(s.x, s.y, Math.max(7, 2.2 * k), 0, 7); g.stroke(); g.fillStyle = "#ffb000"; g.fillText(String(j + 1), s.x + 9, s.y - 8); g.globalAlpha = 1; });
     const ln = (a, b, col, label) => { const s = toScr(cv, a), t = toScr(cv, b); g.strokeStyle = col; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(t.x, t.y); g.stroke();
       [s, t].forEach(q => { g.beginPath(); g.arc(q.x, q.y, 3, 0, 7); g.fillStyle = col; g.fill(); });
-      if (label) { const w = g.measureText(label).width + 8, mx = Math.min(Math.max((s.x + t.x) / 2 + 6, 2), cv.width - w - 2), my = Math.min(Math.max((s.y + t.y) / 2, 40), cv.height - 30);
+      if (label) { const w = g.measureText(label).width + 8, mx = Math.min(Math.max((s.x + t.x) / 2 + 6, 2), cv.W - w - 2), my = Math.min(Math.max((s.y + t.y) / 2, 40), cv.H - 30);
         g.fillStyle = "rgba(0,0,0,.7)"; g.fillRect(mx, my - 15, w, 18); g.fillStyle = col; g.fillText(label, mx + 4, my - 2); } };
     lines.forEach((l, j) => ln(l.a, l.b, "#38d0ff", "L" + (j + 1) + ": " + fmtAng(sepArc(l.a, l.b))));
     if (pending) ln(pending, hover || pending, "rgba(56,208,255,.75)", hover ? fmtAng(sepArc(pending, hover)) : "");
@@ -470,31 +529,32 @@ function overlays(g, cv, i, diverging) {
     g.moveTo(p.x - 12, p.y); g.lineTo(p.x - 3, p.y); g.moveTo(p.x + 3, p.y); g.lineTo(p.x + 12, p.y);
     g.moveTo(p.x, p.y - 12); g.lineTo(p.x, p.y - 3); g.moveTo(p.x, p.y + 3); g.lineTo(p.x, p.y + 12); g.stroke(); g.lineWidth = 2; }
   const ink = diverging ? "#1a1d26" : "#ffffff", bar = 60 / D.scale * k;   // 1′ scale bar, N/E arrows
-  if (bar < cv.width * 0.8) { g.strokeStyle = ink; g.lineWidth = 3; g.beginPath(); g.moveTo(12, cv.height - 14); g.lineTo(12 + bar, cv.height - 14); g.stroke();
-    g.fillStyle = ink; g.font = "12px system-ui"; g.fillText("1′", 12 + bar / 2 - 5, cv.height - 20); }
-  g.strokeStyle = ink; g.fillStyle = ink; g.lineWidth = 1.5; const ax = cv.width - 18, ay = cv.height - 16;
+  if (bar < cv.W * 0.8) { g.strokeStyle = ink; g.lineWidth = 3; g.beginPath(); g.moveTo(12, cv.H - 14); g.lineTo(12 + bar, cv.H - 14); g.stroke();
+    g.fillStyle = ink; g.font = "12px Inter, system-ui, sans-serif"; g.fillText("1′", 12 + bar / 2 - 5, cv.H - 20); }
+  g.strokeStyle = ink; g.fillStyle = ink; g.lineWidth = 1.5; const ax = cv.W - 18, ay = cv.H - 16;
   g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax, ay - 28); g.moveTo(ax, ay); g.lineTo(ax - 28, ay); g.stroke();
-  g.font = "11px system-ui"; g.fillText(LANG === "tr" ? "K" : "N", ax - 4, ay - 31); g.fillText(LANG === "tr" ? "D" : "E", ax - 39, ay + 4);
+  g.font = "11px Inter, system-ui, sans-serif"; g.fillText(LANG === "tr" ? "K" : "N", ax - 4, ay - 31); g.fillText(LANG === "tr" ? "D" : "E", ax - 39, ay + 4);
 }
 let T_RENDER = 0;
 function draw() {
   if (!D) return;
   if (!sample && performance.now() - T_RENDER < 1000) return;   // new photos still decoding: keep the picture there
   const m = $("cmp").value; let i = cur, dv = D.diverging;
-  g1.fillStyle = "#000"; g1.fillRect(0, 0, c1.width, c1.height);
+  g1.setTransform(c1.S, 0, 0, c1.S, 0, 0); g2.setTransform(c2.S, 0, 0, c2.S, 0, 0);
+  g1.fillStyle = "#000"; g1.fillRect(0, 0, c1.W, c1.H);
   if (m === "all" || m === "ab") {
     if (fadeFrom >= 0) { const t = Math.min(1, (performance.now() - fadeT0) / fadeDur()); blit(g1, c1, frameCanvas(fadeFrom)); blit(g1, c1, frameCanvas(cur), t);
       if (t < 1) requestAnimationFrame(draw); else fadeFrom = -1; }
     else blit(g1, c1, frameCanvas(cur));
-  } else if (m === "side") { i = A; blit(g1, c1, frameCanvas(A)); g2.fillStyle = "#000"; g2.fillRect(0, 0, c2.width, c2.height);
+  } else if (m === "side") { i = A; blit(g1, c1, frameCanvas(A)); g2.fillStyle = "#000"; g2.fillRect(0, 0, c2.W, c2.H);
     blit(g2, c2, frameCanvas(B)); overlays(g2, c2, B, dv); tag(g2, "B", 0); }
-  else if (m === "swipe") { i = B; blit(g1, c1, frameCanvas(B)); g1.save(); g1.beginPath(); g1.rect(0, 0, swipeX * c1.width, c1.height); g1.clip(); blit(g1, c1, frameCanvas(A)); g1.restore(); }
-  else if (m === "diff") { i = -1; dv = true; g1.fillStyle = "#f7f7f7"; g1.fillRect(0, 0, c1.width, c1.height); blit(g1, c1, diffCanvas()); }
+  else if (m === "swipe") { i = B; blit(g1, c1, frameCanvas(B)); g1.save(); g1.beginPath(); g1.rect(0, 0, swipeX * c1.W, c1.H); g1.clip(); blit(g1, c1, frameCanvas(A)); g1.restore(); }
+  else if (m === "diff") { i = -1; dv = true; g1.fillStyle = "#f7f7f7"; g1.fillRect(0, 0, c1.W, c1.H); blit(g1, c1, diffCanvas()); }
   overlays(g1, c1, i, dv);
   if (m === "side") tag(g1, "A", 0);
-  if (m === "swipe") { const x = swipeX * c1.width; g1.strokeStyle = "#ffb000"; g1.lineWidth = 2; g1.beginPath(); g1.moveTo(x, 0); g1.lineTo(x, c1.height); g1.stroke();
-    g1.fillStyle = "#ffb000"; g1.beginPath(); g1.arc(x, c1.height / 2, 10, 0, 7); g1.fill();
-    tag(g1, "A", 0); tag(g1, "B", c1.width - 24); }
+  if (m === "swipe") { const x = swipeX * c1.W; g1.strokeStyle = "#5fb0ff"; g1.lineWidth = 2; g1.beginPath(); g1.moveTo(x, 0); g1.lineTo(x, c1.H); g1.stroke();
+    g1.fillStyle = "#5fb0ff"; g1.beginPath(); g1.arc(x, c1.H / 2, 10, 0, 7); g1.fill();
+    tag(g1, "A", 0); tag(g1, "B", c1.W - 24); }
   const f = i >= 0 ? D.frames[i] : null, warn = f && f.flags && f.flags.length ? ' <span class="w">Warning: flags at target: ' + esc(f.flags.join(", ")) + "</span>" : "";
   $("title").innerHTML = (m === "side" ? "A: " + esc(D.frames[A].label) + " &nbsp;|&nbsp; B: " + esc(D.frames[B].label)
     : m === "swipe" ? "A (left of the divider): " + D.frames[A].date + " · B (right): " + D.frames[B].date + " — drag the divider"
@@ -504,6 +564,12 @@ function draw() {
   if (!ready.every(Boolean)) $("read").textContent = "Loading the photos… " + ready.filter(Boolean).length + " of " + N;
   markTimeline();
 }
+let rafQ = 0;
+function drawSoon() {   // (a timer as well: embedded views do not always fire animation frames)
+  if (rafQ) return; let done = false; const go = () => { if (done) return; done = true; rafQ = 0; draw(); };
+  rafQ = requestAnimationFrame(go) || 1; setTimeout(go, 50);
+}
+let thumbT = 0; const thumbsSoon = () => { clearTimeout(thumbT); thumbT = setTimeout(thumbs, 120); };
 const fadeDur = () => Math.min(400, +$("speed").value * 0.45);
 
 // ---------- timeline: real dates, long gaps squeezed ----------
@@ -518,6 +584,12 @@ function buildTimeline() {
     b.title = f.date + " · " + f.label; b.setAttribute("aria-label", "Show the photo of " + f.date); b.innerHTML = '<span class="ab"></span>';
     b.onclick = () => { stop(); setFrame(i); }; b.dataset.i = i; tl.appendChild(b);
     if (P(i) - lastX > 11) { const y = document.createElement("span"); y.className = "yr"; y.textContent = f.date.slice(0, 7); y.style.left = P(i) + "%"; tl.appendChild(y); lastX = P(i); } });
+  edgeYears();
+}
+function edgeYears() {   // a year label centred on the first or last photo stays inside the timeline
+  const tl = $("tl"), W = tl.clientWidth; if (!W) return;
+  tl.querySelectorAll(".yr").forEach(y => { const c = parseFloat(y.style.left) / 100 * W, h = y.offsetWidth / 2;
+    y.style.transform = "translateX(" + (-h + Math.max(0, h - c) - Math.max(0, c + h - W)) + "px)"; });
 }
 function markTimeline() { const m = $("cmp").value; document.querySelectorAll(".tl .t").forEach(b => { const i = +b.dataset.i;
   b.classList.toggle("cur", (m === "all" || m === "ab") && i === cur); b.firstChild.textContent = m !== "all" ? (i === A ? "A" : i === B ? "B" : "") : ""; }); }
@@ -548,7 +620,9 @@ function thumbs() {   // comparison card: each mark on its own photo only, side 
     const fig = document.createElement("figure"), cap = document.createElement("figcaption"), b = aper(i, m);
     fig.appendChild(c); fig.appendChild(ov); cap.textContent = "#" + (k + 1) + " " + f.date + (isFinite(b) ? " · " + num(b, 2) : " · –"); fig.appendChild(cap);
     fig.title = f.label + "\nBrightness at the mark (light within 2.5 px minus the local sky, sum of MJy/sr): " + (isFinite(b) ? num(b, 3) : "no data");
-    fig.onclick = () => { stop(); setFrame(i); }; wrap.appendChild(fig); });
+    fig.onclick = () => { stop(); setFrame(i); }; fig.tabIndex = 0; fig.setAttribute("role", "button");
+    fig.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); fig.onclick(); } };
+    wrap.appendChild(fig); });
   el.innerHTML = '<div class="small">Each mark on the photo you marked it on, nothing else. The crosshair is your mark; the number is the brightness there with the sky removed. Click one to show that photo.</div>';
   el.appendChild(wrap);
 }
@@ -617,7 +691,7 @@ $("prev").onclick = () => { stop(); step(-1); }; $("next").onclick = () => { sto
 $("speed").oninput = () => { if (timer) start(); };
 $("tMark").onclick = () => setTool("mark"); $("tRuler").onclick = () => setTool("ruler"); $("tLook").onclick = () => setTool("look");
 $("cmp").onchange = () => { stop(); fit(); }; $("selA").onchange = e => { A = +e.target.value; draw(); }; $("selB").onchange = e => { B = +e.target.value; draw(); };
-["stretch", "blk", "wht", "oFlag"].forEach(id => $(id).addEventListener("input", () => { ver++; draw(); thumbs(); }));
+["stretch", "blk", "wht", "oFlag"].forEach(id => $(id).addEventListener("input", () => { ver++; drawSoon(); thumbsSoon(); }));
 ["oTgt", "oGaia", "oMine", "oStars", "oChg"].forEach(id => $(id).addEventListener("input", draw));
 $("zreset").onclick = () => { view = {z: 1, vx: (D.nx - 1) / 2, vy: (D.ny - 1) / 2}; draw(); };
 $("undo").onclick = () => { if (pending) pending = null; else { const lm = marks.length ? marks[marks.length - 1].t || 0 : -1, ll = lines.length ? lines[lines.length - 1].t || 0 : -1;
@@ -633,25 +707,25 @@ $("csv").onclick = () => { let t = "kind,name,date,ra_deg,dec_deg,ra2_deg,dec2_d
 // mouse: click = tool action, drag = move the view (or the swipe divider), wheel = zoom
 let drag = null;
 [c1, c2].forEach(cv => {
-  cv.addEventListener("pointerdown", ev => { if (!D) return; const r = cv.getBoundingClientRect(), sx = (ev.clientX - r.left) * cv.width / r.width;
-    drag = {cv, x: ev.clientX, y: ev.clientY, vx: view.vx, vy: view.vy, moved: false, swipe: $("cmp").value === "swipe" && Math.abs(sx - swipeX * cv.width) < 16};
+  cv.addEventListener("pointerdown", ev => { if (!D) return; const r = cv.getBoundingClientRect(), sx = (ev.clientX - r.left) * cv.W / r.width;
+    drag = {cv, x: ev.clientX, y: ev.clientY, vx: view.vx, vy: view.vy, moved: false, swipe: $("cmp").value === "swipe" && Math.abs(sx - swipeX * cv.W) < 16};
     cv.setPointerCapture(ev.pointerId); });
   cv.addEventListener("pointermove", ev => { if (!D) return;
     hover = evImg(cv, ev); readout(cv, ev);
     if (drag && drag.cv === cv) { const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y; if (Math.hypot(dx, dy) > 4) drag.moved = true;
       if (drag.moved) { const r = cv.getBoundingClientRect();
         if (drag.swipe) swipeX = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-        else { const k = K(cv) * r.width / cv.width; view.vx = drag.vx - dx / k; view.vy = drag.vy + dy / k; clampView(); cv.style.cursor = "grabbing"; } } }
-    draw(); });
+        else { const k = K(cv) * r.width / cv.W; view.vx = drag.vx - dx / k; view.vy = drag.vy + dy / k; clampView(); cv.style.cursor = "grabbing"; } } }
+    drawSoon(); });
   cv.addEventListener("pointerup", ev => { const d = drag; drag = null; cv.style.cursor = tool === "look" ? "grab" : "crosshair"; if (!D || !d || d.moved) return;
     hover = evImg(cv, ev); const fi = frameUnder(cv), f = D.frames[fi < 0 ? B : fi]; let p = hover;
     if (tool === "mark") { const sn = $("snap").checked; p = snap(p, fi);
       marks.push({x: p.x, y: p.y, mjd: f.mjd, date: f.date, uid: f.uid, snap: sn, t: Date.now()}); changed(); }
     else if (tool === "ruler") { p = snap(p, fi); if (!pending) { pending = p; panel(); } else { lines.push({a: pending, b: p, mjd: f.mjd, t: Date.now()}); pending = null; changed(); } } });
-  cv.addEventListener("pointerleave", () => { hover = null; $("hov").style.display = "none"; draw(); });
-  cv.addEventListener("wheel", ev => { if (!D) return; ev.preventDefault(); const r = cv.getBoundingClientRect(), sx = (ev.clientX - r.left) * cv.width / r.width, sy = (ev.clientY - r.top) * cv.height / r.height;
+  cv.addEventListener("pointerleave", () => { hover = null; $("hov").style.display = "none"; drawSoon(); });
+  cv.addEventListener("wheel", ev => { if (!D) return; ev.preventDefault(); const r = cv.getBoundingClientRect(), sx = (ev.clientX - r.left) * cv.W / r.width, sy = (ev.clientY - r.top) * cv.H / r.height;
     const p = toImg(cv, sx, sy); view.z = Math.max(1, Math.min(24, view.z * (ev.deltaY < 0 ? 1.25 : 0.8)));
-    view.vx = p.x - (sx - cv.width / 2) / K(cv); view.vy = p.y + (sy - cv.height / 2) / K(cv); clampView(); draw(); }, {passive: false});
+    view.vx = p.x - (sx - cv.W / 2) / K(cv); view.vy = p.y + (sy - cv.H / 2) / K(cv); clampView(); drawSoon(); }, {passive: false});
 });
 function readout(cv, ev) {
   const s = sky(hover), i = frameUnder(cv);
@@ -664,9 +738,14 @@ function readout(cv, ev) {
     if (d < 12 && !best) best = {text: c.label + ": " + c.text}; });
   if (!best && $("oTgt").checked && fr.target) { const p = toScr(cv, fr.target); if (Math.hypot(p.x - q.x, p.y - q.y) < 12) best = {text: fr.target.label}; }
   if (best) { const st = $("stage").getBoundingClientRect(); H.innerHTML = esc(best.text || "").replace(/&lt;br&gt;/g, "<br>"); H.style.display = "block";
-    H.style.left = Math.min(ev.clientX - st.left + 14, st.width - 200) + "px"; H.style.top = (ev.clientY - st.top + 14) + "px"; } else H.style.display = "none";
+    const hw = H.offsetWidth, hh = H.offsetHeight; let x = ev.clientX - st.left + 14, y = ev.clientY - st.top + 14;
+    if (x + hw > st.width - 2) x = ev.clientX - st.left - hw - 14; if (y + hh > st.height - 2) y = ev.clientY - st.top - hh - 14;
+    H.style.left = Math.max(0, x) + "px"; H.style.top = Math.max(0, y) + "px"; } else H.style.display = "none";
 }
-document.addEventListener("keydown", e => { if (!D || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return; const k = e.key.toLowerCase();
+document.addEventListener("keydown", e => { if (!D || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target, tg = t.tagName, ty = (t.type || "").toLowerCase(), k = e.key.toLowerCase();
+  if (tg === "SELECT" || tg === "TEXTAREA" || t.isContentEditable || (tg === "INPUT" && ty !== "checkbox")) return;
+  if (k === " " && (ty === "checkbox" || t.getAttribute("role") === "button")) return;
   if (k === "arrowleft") { stop(); step(-1); } else if (k === "arrowright") { stop(); step(1); }
   else if (k === "m") setTool("mark"); else if (k === "l") setTool("ruler"); else if (k === "v") setTool("look");
   else if (k === "z") $("undo").click(); else if (k === "0") $("zreset").click();
@@ -691,7 +770,7 @@ function scaleChart() {   // the four curves: pixel brightness across, grey on s
   c.width = W * dpr; c.height = H * dpr; c.style.width = W + "px"; c.style.height = H + "px";
   const g = c.getContext("2d"); g.scale(dpr, dpr); const x0 = 26, y0 = H - 18, w = W - 110, h = H - 28;
   g.strokeStyle = "#3a4258"; g.lineWidth = 1; g.strokeRect(x0, y0 - h, w, h);
-  g.fillStyle = "#9aa3b5"; g.font = "10.5px system-ui"; g.fillText(LANG === "tr" ? "parlaklık →" : "brightness →", x0 + w - 70, H - 4);
+  g.fillStyle = "#9aa3b5"; g.font = "10.5px Inter, system-ui, sans-serif"; g.fillText(LANG === "tr" ? "parlaklık →" : "brightness →", x0 + w - 70, H - 4);
   g.save(); g.translate(10, y0 - 4); g.rotate(-Math.PI / 2); g.fillText(LANG === "tr" ? "gri →" : "grey →", 0, 0); g.restore();
   [["linear", "#c3c2b7"], ["sqrt", "#3987e5"], ["log", "#199e70"], ["asinh", "#ffb000"]].forEach(([k, col], j) => {
     g.strokeStyle = col; g.lineWidth = k === $("stretch").value ? 3 : 1.6; g.beginPath();
@@ -701,7 +780,9 @@ function scaleChart() {   // the four curves: pixel brightness across, grey on s
 }
 (() => { const wrap = $("qStretch"), q = wrap.querySelector(".qm"), pop = wrap.querySelector(".pop");
   let pinned = false;
-  const show = () => { pop.innerHTML = SCALE_HELP[LANG === "tr" ? "tr" : "en"]; pop.appendChild(scaleChart()); wrap.classList.add("open"); setHeight(); };
+  const show = () => { pop.innerHTML = SCALE_HELP[LANG === "tr" ? "tr" : "en"]; pop.appendChild(scaleChart()); wrap.classList.add("open");
+    pop.style.left = "0px"; const r = pop.getBoundingClientRect(), over = r.right - (document.documentElement.clientWidth - 8);
+    if (over > 0) pop.style.left = Math.max(8 - r.left, -over) + "px"; setHeight(); };
   const hide = () => { if (!pinned) wrap.classList.remove("open"); };
   q.addEventListener("mouseenter", show); wrap.addEventListener("mouseleave", hide);
   q.addEventListener("focus", show); q.addEventListener("blur", () => { pinned = false; hide(); });

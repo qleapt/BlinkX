@@ -70,6 +70,8 @@ TR: dict[str, str] = {
         "Resmin yay dakikası (′) cinsinden genişliği. 60′ = 1°; dolunay yaklaşık 30′ genişliğindedir. Daha geniş "
         "alanların yüklenmesi biraz daha uzun sürer.",
     "**③ Extras**": "**③ Ekstralar**",
+    "What to look at": "Neye bakılacak", "Colour and size": "Renk ve boyut", "Extras": "Ekstralar",
+    "SPHEREx Blink Viewer": "SPHEREx Blink Görüntüleyici",
     "Load the Gaia star list": "Gaia yıldız listesini yükle",
     "Fetches the stars catalogued by ESA's Gaia satellite. They stay hidden until you tick *Gaia stars* in the "
     "viewer; then each is drawn as a blue circle where it should be on that date. Hover a circle for its details.":
@@ -85,7 +87,6 @@ TR: dict[str, str] = {
         "Parlaklık, kontrast, hız ve işaretli pikseller görüntüleyicinin içinden ayarlanır.",
     "Words used here": "Burada kullanılan terimler",
     # --- page top -----------------------------------------------------------------------------
-    "SPHEREx Blink Viewer": "SPHEREx Blink Görüntüleyici",
     "SPHEREx photographs the whole sky every six months in 102 infrared colours. Flip between its photos of one "
     "spot: whatever moves or changes brightness stands out.":
         "SPHEREx tüm gökyüzünü altı ayda bir 102 kızılötesi renkte fotoğraflar. Aynı noktanın fotoğrafları "
@@ -493,6 +494,10 @@ TR: dict[str, str] = {
     "SPHEREx data through {} · processing {} · {} · loaded in {} s · Data: NASA/IPAC Infrared Science Archive (IRSA, "
     "via its AWS copy), ESA Gaia.":
         "SPHEREx verileri {} tarihine kadar · işleme {} · {} · {} sn'de yüklendi · Veri: NASA/IPAC Kızılötesi Bilim "
+        "Arşivi (IRSA, AWS kopyası üzerinden), ESA Gaia.",
+    "SPHEREx data through {} · processing {} · loaded in {} s · Data: NASA/IPAC Infrared Science Archive (IRSA, "
+    "via its AWS copy), ESA Gaia.":   # the same line without a Gaia note (star list off)
+        "SPHEREx verileri {} tarihine kadar · işleme {} · {} sn'de yüklendi · Veri: NASA/IPAC Kızılötesi Bilim "
         "Arşivi (IRSA, AWS kopyası üzerinden), ESA Gaia.",
     "{} Gaia DR3 stars (G < {}, via {})": "{} Gaia DR3 yıldızı (G < {}, kaynak: {})",
     "Gaia star list still loading": "Gaia yıldız listesi hâlâ yükleniyor",

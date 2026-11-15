@@ -4,10 +4,22 @@ headless = true
 [browser]
 gatherUsageStats = false
 
+# Deep-space navy with a launch-blue accent (spx/theme.py adds the page styling on top of this)
 [theme]
 base = "dark"
-primaryColor = "#ffb000"
-backgroundColor = "#0b0e16"
-secondaryBackgroundColor = "#151a26"
-textColor = "#e8eaf0"
-borderColor = "#262c3b"
+primaryColor = "#2b8cff"
+backgroundColor = "#050a17"
+secondaryBackgroundColor = "#0d1833"
+textColor = "#e8eefb"
+borderColor = "#1d2d52"
+linkColor = "#5fb0ff"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, monospace"
+baseRadius = "10px"
+buttonRadius = "10px"
+blueColor = "#2b8cff"
+
+[theme.sidebar]
+backgroundColor = "#06102a"
+secondaryBackgroundColor = "#0d1a38"
+borderColor = "#1d2d52"

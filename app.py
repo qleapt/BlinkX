@@ -14,7 +14,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from astropy.time import Time
 
 from spx import (archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, prefetch, render, stack,
-                 targets, teleport, viewer, warp)
+                 targets, teleport, theme, viewer, warp)
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
 # English / Turkish: everything Streamlit shows goes through i18n.tr() when Turkish is chosen
@@ -305,11 +305,18 @@ GLOSSARY = """
 # --- sidebar ------------------------------------------------------------------------
 i18n.GLOSSARY_EN = GLOSSARY
 
+def _sec(icon, text):
+    st.html(theme.section(icon, i18n.tr(text, ss.lang)))
+
+
+st.html(theme.CSS)
 with st.sidebar:
+    st.html(theme.brand("SPHEREx Blink", i18n.tr(
+        "SPHEREx photographs the whole sky every six months in 102 infrared colours. Flip between its photos of one "
+        "spot: whatever moves or changes brightness stands out.", ss.lang)))
     st.segmented_control("Language / Dil", list(i18n.LANGS), key="lang", required=True, format_func=i18n.LANGS.get,
-                         help="English or Turkish / İngilizce veya Türkçe")
-    st.header("SPHEREx Blink")
-    st.markdown("**① What to look at**")
+                         label_visibility="collapsed", help="English or Turkish / İngilizce veya Türkçe")
+    _sec("info", "What to look at")
     st.text_input("Object name or sky position (RA Dec in degrees)", key="target_text",
                   placeholder="Barnard's Star  ·  M 42  ·  269.452 4.693  ·  /RTP",
                   help="Type the name of a star, galaxy or nebula (looked up in the SIMBAD catalogue), or a "
@@ -320,18 +327,17 @@ with st.sidebar:
     st.button("Go", type="primary", use_container_width=True, help="Load this object or position")
     _input_hint(ss.target_text)
     st.caption("…or pick a challenge target:")
-    cols = st.columns(2)
-    for i, name in enumerate(targets.PRESETS):
-        cols[i % 2].button(name, on_click=_pick, args=(name,), use_container_width=True,
-                           help=PRESET_HELP.get(name))
-    st.markdown("**② Colour and size**")
+    with st.container(key="spxpresets"):
+        for name in targets.PRESETS:
+            st.button(name, on_click=_pick, args=(name,), use_container_width=True, help=PRESET_HELP.get(name))
+    _sec("palette", "Colour and size")
     st.selectbox("Band (which infrared colour)", list(config.BANDS), key="band", format_func=BAND_LABEL.get,
                  help=BAND_HELP)
-    st.radio("Field of view (how much sky)", config.FOV_CHOICES, key="fov", horizontal=True,
-             format_func=lambda f: f"{f}′",
-             help="Width of the picture in arcminutes (′). 60′ = 1°; the full Moon is about 30′ wide. "
-                  "Bigger fields take a little longer to load.")
-    st.markdown("**③ Extras**")
+    st.segmented_control("Field of view (how much sky)", config.FOV_CHOICES, key="fov", required=True,
+                         format_func=lambda f: f"{f}′",
+                         help="Width of the picture in arcminutes (′). 60′ = 1°; the full Moon is about 30′ wide. "
+                              "Bigger fields take a little longer to load.")
+    _sec("sparkles", "Extras")
     st.toggle("Load the Gaia star list", key="gaia",
               help="Fetches the stars catalogued by ESA's Gaia satellite. They stay hidden until you tick "
                    "*Gaia stars* in the viewer; then each is drawn as a blue circle where it should be on that "
@@ -455,9 +461,6 @@ class Loader:
         return secs
 
 
-st.title("SPHEREx Blink Viewer")
-st.caption("SPHEREx photographs the whole sky every six months in 102 infrared colours. "
-           "Flip between its photos of one spot: whatever moves or changes brightness stands out.")
 st.segmented_control("View", list(MODES), key="mode", required=True, format_func=MODE_LABEL.get,
                      label_visibility="collapsed",
                      help="How to look at the photos:\n\n" + "\n".join(f"- **{MODE_LABEL[m]}**: {MODE_HELP[m]}"
@@ -1813,17 +1816,17 @@ with tab_view:
         st.caption("*Note: the helpers are experimental. They can miss things or report false alarms, so always check "
                    "their results by eye.*")
 
-    c1, c2, c3 = st.columns([2, 2, 3])
-    if not load_all and n_band > len(todo):
-        c1.button(f"Load all {band} photos ({min(n_band, config.LOAD_ALL_CAP)} of {n_band})",
-                  on_click=lambda: ss.__setitem__(load_key, True),
-                  help="The quick look averages a few photos per date. Loading all gives a cleaner, deeper image "
-                       "but takes longer.")
-    _gif_args = (shown, ss.stretch, diverging, ss.speed)  # built only when the button is pressed
-    c2.download_button("Download GIF", lambda: render.to_gif(*_gif_args),
-                       file_name=f"spherex_{tgt.name.replace(' ', '_')}_{band}_{mode}.gif", mime="image/gif",
-                       help="Save the animation as a GIF to share.")
-    with c3.expander("What am I looking at?"):
+    with st.container(horizontal=True, gap="small", key="spxacts"):   # the view's actions, side by side
+        if not load_all and n_band > len(todo):
+            st.button(f"Load all {band} photos ({min(n_band, config.LOAD_ALL_CAP)} of {n_band})",
+                      on_click=lambda: ss.__setitem__(load_key, True),
+                      help="The quick look averages a few photos per date. Loading all gives a cleaner, deeper image "
+                           "but takes longer.")
+        _gif_args = (shown, ss.stretch, diverging, ss.speed)  # built only when the button is pressed
+        st.download_button("Download GIF", lambda: render.to_gif(*_gif_args),
+                           file_name=f"spherex_{tgt.name.replace(' ', '_')}_{band}_{mode}.gif", mime="image/gif",
+                           help="Save the animation as a GIF to share.")
+    with st.expander("What am I looking at?"):
         st.markdown(
             "Each frame is a SPHEREx photo of the same patch of sky, taken months apart and averaged per "
             "*epoch* (one pass of the survey). North is up, east is left; the white bar is 1 arcminute (1′). "
@@ -1856,7 +1859,9 @@ with tab_exp:
 last, versions = archive.data_through(exps)
 where = (f"Position RA {ra0:.5f}, Dec {dec0:+.5f}. " if tgt.source == "coordinates" else
          f"{tgt.name}: RA {ra0:.5f}, Dec {dec0:+.5f} on 2026-01-01 ({tgt.source}). ")
-st.caption(where +
-           f"SPHEREx data through {targets.mjd_to_date(last)} · processing {', '.join(versions)} · "
-           f"{gaia_note} · loaded in {load_secs:.1f} s · "
-           "Data: NASA/IPAC Infrared Science Archive (IRSA, via its AWS copy), ESA Gaia.")
+_data_line = " · ".join(p for p in (   # (no Gaia note when the star list is off: no empty slot)
+    f"SPHEREx data through {targets.mjd_to_date(last)}", f"processing {', '.join(versions)}", gaia_note,
+    f"loaded in {load_secs:.1f} s",
+    "Data: NASA/IPAC Infrared Science Archive (IRSA, via its AWS copy), ESA Gaia.") if p)
+# the two sentences are translated one by one: as one text neither template would match
+st.caption(i18n.tr(where.strip(), ss.lang) + " " + i18n.tr(_data_line, ss.lang))

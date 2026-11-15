@@ -37,7 +37,8 @@ def stretch(img: np.ndarray, lo: float, hi: float, kind: str = "asinh", divergin
 
 # --- charts (dataviz: validated dark categorical order, fixed per epoch, never cycled) -------
 EPOCH_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#0ca30c", "#9085e9", "#e66767"]
-INK, INK2, GRID = "#f0efec", "#c3c2b7", "rgba(195,194,183,0.15)"
+INK, INK2, GRID = "#e8eefb", "#a3b3d1", "rgba(163,179,209,0.14)"
+SURF = "#0b1630"   # plot area: the page's panel navy (hollow markers are filled with it)
 
 
 def epoch_color(k: int) -> str:
@@ -46,10 +47,15 @@ def epoch_color(k: int) -> str:
 
 def _chart_layout(fig, xtitle, ytitle, height=420, logy=False):
     fig.update_layout(
-        height=height, margin=dict(l=60, r=20, t=30, b=50), paper_bgcolor="#1a1a19", plot_bgcolor="#1a1a19",
+        height=height, margin=dict(l=60, r=20, t=30, b=50), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor=SURF,
         font=dict(color=INK2, size=13), hovermode="closest",
-        hoverlabel=dict(bgcolor="#262624", font=dict(color=INK)),
+        hoverlabel=dict(bgcolor="#0e1a36", bordercolor="#2a4275", font=dict(color=INK)),
         legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0, font=dict(color=INK2)))
+    # horizontal legend entries get a fixed width from the longest name: Plotly measures text once and caches it, so a
+    # measurement taken before the web font arrived would leave each name running under the next entry's marker
+    names = [t.name for t in fig.data if t.name and t.showlegend is not False]
+    if names:
+        fig.update_layout(legend=dict(entrywidthmode="pixels", entrywidth=int(5.8 * max(map(len, names)) + 16)))
     fig.update_xaxes(title=xtitle, gridcolor=GRID, zeroline=False, linecolor=GRID)
     fig.update_yaxes(title=ytitle, gridcolor=GRID, zeroline=False, linecolor=GRID,
                      type="log" if logy else "linear")
@@ -68,7 +74,7 @@ def _points(rows, k, x, name, show_legend=True):
             x=[r[x] for r in sel], y=[r["flux"] for r in sel], mode="markers",
             name=name if not flagged else f"{name} (flagged)", legendgroup=name,
             showlegend=show_legend,
-            marker=dict(size=9, color="#1a1a19" if flagged else col, line=dict(width=2, color=col),
+            marker=dict(size=9, color=SURF if flagged else col, line=dict(width=2, color=col),
                         symbol="circle"),
             error_y=dict(type="data", array=[r["err"] for r in sel], color=col, thickness=1.2, width=0),
             customdata=[[r["date"], r["wavelength"], r["err"], ", ".join(r["flags"]) or "none", r["band"]]
@@ -110,7 +116,7 @@ def motion_fig(track_e, track_n, pts):
         fig.add_trace(go.Scatter(
             x=[p["de"]], y=[p["dn"]], mode="markers", name=p["label"],
             marker=dict(size=11, color=col, symbol="circle" if p["epoch"] else "diamond",
-                        line=dict(width=2, color="#1a1a19")),
+                        line=dict(width=2, color=SURF)),
             error_x=dict(type="data", array=[p["err"]], color=col, thickness=1.2, width=0),
             error_y=dict(type="data", array=[p["err"]], color=col, thickness=1.2, width=0),
             customdata=[[p["date"], p["err"], p["off"]]],
@@ -179,7 +185,7 @@ def future_fig(marks, path, future, catalogue=None, tick_label="year"):
             fig.add_trace(go.Scatter(
                 x=[future["e"][i] for i in idx], y=[future["n"][i] for i in idx], mode="markers+text",
                 text=[t for _, t in ticks], textposition="top center", textfont=dict(color=FUTURE, size=11),
-                marker=dict(size=7, color=FUTURE, line=dict(width=1, color="#1a1a19")),
+                marker=dict(size=7, color=FUTURE, line=dict(width=1, color=SURF)),
                 name=f"predicted position each {tick_label}",
                 customdata=[[t, future["se"][i], future["sn"][i]] for i, t in ticks],
                 hovertemplate=("%{customdata[0]}: east %{x:.1f}″, north %{y:.1f}″<br>± %{customdata[1]:.1f}″ east, "
@@ -190,7 +196,7 @@ def future_fig(marks, path, future, catalogue=None, tick_label="year"):
         fig.add_trace(go.Scatter(
             x=[m["e"]], y=[m["n"]], mode="markers+text", text=[m["label"]], textposition="bottom right",
             textfont=dict(color=col, size=11), name=f"{m['label']} · {m['date']}" + (" (found)" if found else ""),
-            marker=dict(size=11, color="#1a1a19" if found else col, line=dict(width=2, color=col),
+            marker=dict(size=11, color=SURF if found else col, line=dict(width=2, color=col),
                         symbol="diamond" if found else "circle"),
             error_x=dict(type="data", array=[m["err"]], color=col, thickness=1.2, width=0),
             error_y=dict(type="data", array=[m["err"]], color=col, thickness=1.2, width=0),
@@ -225,7 +231,7 @@ def track_time_fig(marks, model, today=None):
             col = epoch_color(k + 1)
             fig.add_trace(go.Scatter(
                 x=[m["datetime"]], y=[m[key]], mode="markers", name=m["label"], showlegend=False,
-                marker=dict(size=9, color=col, line=dict(width=1.5, color="#1a1a19")),
+                marker=dict(size=9, color=col, line=dict(width=1.5, color=SURF)),
                 error_y=dict(type="data", array=[m["err"]], color=col, thickness=1.2, width=0),
                 hovertemplate=f"{m['label']}<br>%{{x}}<br>%{{y:.1f}}″ ± {m['err']:.1f}″<extra></extra>"),
                 row=row, col=1)
@@ -256,7 +262,7 @@ def separation_fig(path, measured, unit_note="", today=None):
         fig.add_trace(go.Scatter(
             x=[m["datetime"] for m in measured], y=[m["sep"] for m in measured], mode="markers",
             name="measured on a photo with both", text=[m["label"] for m in measured],
-            marker=dict(size=10, color=INK, line=dict(width=1.5, color="#1a1a19")),
+            marker=dict(size=10, color=INK, line=dict(width=1.5, color=SURF)),
             error_y=dict(type="data", array=[m["err"] for m in measured], color=INK, thickness=1.2, width=0),
             hovertemplate="%{text}<br>%{x}<br>%{y:.1f}″<extra></extra>"))
     if today:
