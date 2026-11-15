@@ -14,7 +14,7 @@ from pathlib import Path
 DEFAULT_PER_PHOTO = 0.6   # s per photo to download, before anything was learned (parallel downloads)
 CACHED_SECONDS = 0.03     # s per photo already saved on this computer
 ALIGN_SECONDS = 0.04      # s per photo to line it up and average
-DEFAULT_STEP = {"search": 4.0}   # s, before anything was learned
+DEFAULT_STEP = {"search": 4.0, "resolve": 1.5, "fetch": 6.0, "motion": 0.8}   # s, before anything was learned
 
 
 class Estimator:
@@ -71,6 +71,10 @@ class Estimator:
         if elapsed > 1.3 * usual + 1:
             return None
         return max(0.0, usual - elapsed)
+
+    def usual(self, kind: str) -> float:
+        """How long a step usually takes on this computer (learned), in seconds."""
+        return self.steps.get(kind, DEFAULT_STEP.get(kind, 5.0))
 
     def learn_step(self, kind: str, seconds: float) -> None:
         if seconds <= 0:

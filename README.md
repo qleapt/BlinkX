@@ -93,14 +93,19 @@ Embed in another page:
    Everything is cached on disk. A target never seen before loads in about 7–10 s (≈ 65 s before these changes);
    the all-band spectrum in about 13 s. Each photo takes three round trips to AWS (the places of the VARIANCE
    and ZODI layers follow from the file's length, learned once per detector), and the connections open while the
-   archive search runs. For `/RTP` the next random spots are picked ahead of time and loaded quietly in the
-   background (search, photos, lined up), so a jump lands at once; that background work pauses while a load
-   you are waiting for runs. Once a view is on screen, the other five bands of the same spot are loaded and
+   archive search runs. For `/RTP` three random spots are kept ready on disk (`rtp_stock.json`, filled from the
+   first page on and kept across restarts): first the archive's list and one photo per date of each, then
+   everything for the next one, before the other bands' far end and the spectrum. A jump takes the readiest
+   spot and lands in about 2 s, even on a slow connection; that background work pauses while a load you are
+   waiting for runs. A spot searched more than 12 h ago waits at most 2 s for NASA's archive and otherwise uses
+   its saved list, so a slow or failing archive never holds a known spot. Once a view is on screen, the other five bands of the same spot are loaded and
    lined up the same way (nearest band first, then the spectrum's photos) and handed to the browser, so a band
    chosen in the sidebar appears in the same frame. A spot never seen before is shown as soon as every date
    has one photo (photos already on disk first, then one per date): the rest are filled in by themselves, and
    Gaia and the older surveys never hold the page for more than half a second. The loading screen only appears
-   when NASA's archive is actually asked.
+   when NASA's archive is actually asked; it counts the time left down every second (learned on this computer,
+   corrected by the speed seen). The Motion check shows one progress bar for the whole check instead: download,
+   measuring the positions, fitting the path.
 4. **Align and stack.** Zodiacal light and the local sky are removed, each exposure is reprojected onto one
    north-up grid at 2× the detector resolution (3.1″ pixels), and the exposures of an epoch are averaged with
    inverse-variance weights. Dead pixels are removed; flagged pixels (saturation, cosmic rays…) get a tiny weight,
@@ -146,7 +151,7 @@ spx/render.py       stretches, charts (spectrum, light curve, motion, miss dista
 spx/viewer/         the sky viewer: pixel values packed into PNGs, two-way component (frontend/index.html)
 spx/detect.py       optional helpers: star detection, what changed between two dates
 spx/motion.py       motion engine: joint fit of N positions, model choice, leave-one-out, classification, prediction
-spx/teleport.py     /RTP: the next random spots picked ahead and loaded quietly in the background
+spx/teleport.py     /RTP: a stock of random spots kept ready on disk, loaded quietly in the background
 spx/prefetch.py     the other bands of the view loaded and lined up ahead, so a band change is instant
 spx/warp.py         full-window loading screen (canvas star field)
 spx/eta.py          time-left estimate while loading, learned on this computer

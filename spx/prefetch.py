@@ -12,13 +12,14 @@ import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import archive, catalogs, config, cutouts, stack
+from . import archive, catalogs, config, cutouts, stack, teleport
 
 _JOBS = ThreadPoolExecutor(1, thread_name_prefix="spx-bands")
 _READY: OrderedDict = OrderedDict()   # stack.frames_key -> (by_uri, frames), lined up in the background
 _LOCK = threading.Lock()
 _KEEP = 8          # lined-up bands kept in memory (one spot's six, and a little more)
 _VIEW = [None]     # the spot and field being loaded ahead; another one calls the old work off
+NEAREST = 2        # bands loaded before the next /RTP spots get their first photos
 
 
 def view_key(name: str, ra0: float, dec0: float, fov, exps=(), survey: bool = False) -> tuple:
@@ -84,7 +85,9 @@ def _run(view, tgt, ra0, dec0, fov, bands, exps, survey) -> None:
     stale = lambda: _VIEW[0] != view   # noqa: E731  (another spot or field is being looked at now)
     size = fov * 1.45
     wgrid, shape = stack.grid(ra0, dec0, fov)
-    for band in bands:   # the quick look of each band, lined up
+    for i, band in enumerate(bands):   # the quick look of each band, lined up
+        if i == NEAREST:   # the two nearest bands first, then the next /RTP spots' first step, then the others
+            teleport.wait_idle(1, stale)
         if stale():
             return
         groups = groups_for(exps, band)
@@ -109,6 +112,8 @@ def _run(view, tgt, ra0, dec0, fov, bands, exps, survey) -> None:
             for g in archive.select(exps, b, quick=True, cap=config.SPEC_CAP_PER_BAND,
                                     quick_total=config.SPEC_QUICK_PER_BAND).values() for e in g]
     spec = [e for e in spec if not cutouts.is_cached(e, ra0, dec0, size)]
+    if spec:
+        teleport.wait_idle(2, stale)   # the next /RTP spot comes before these
     if spec and not stale():
         try:
             cutouts.fetch_many(spec, ra0, dec0, size, background=True, stop=stale)

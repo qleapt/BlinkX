@@ -152,13 +152,42 @@ def is_cached(ra: float, dec: float) -> bool:
     return False
 
 
+def saved(ra: float, dec: float) -> list[Exposure] | None:
+    """The list saved by an earlier search of this position, however old (the complete one when there is one), or
+    None. No network."""
+    for path in (_tap_path(ra, dec), _sia_path(ra, dec)):
+        try:
+            rows = _from_cache(path, float("inf"))
+        except Exception:
+            rows = None
+        if rows:
+            return rows
+    return None
+
+
+_REFRESH = ThreadPoolExecutor(4, thread_name_prefix="spx-refresh")
+
+
 def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
     """All exposures whose footprint contains (ra, dec). Cached on disk for 12 h. Two searches for the same
-    position at the same time (a /RTP spot being loaded ahead, then used) share one request."""
+    position at the same time (a /RTP spot being loaded ahead, then used) share one request. A position searched
+    longer ago waits config.SEARCH_STALE_WAIT for a fresh list and otherwise uses the saved one (new photos of the
+    week then appear on the next visit): NASA's archive being slow or down never holds a known spot."""
     if use_cache:
         rows = _from_cache(_tap_path(ra, dec), config.TAP_CACHE_HOURS)
         if rows is not None:
             return rows
+        old = saved(ra, dec)
+        if old:
+            fut = _REFRESH.submit(_fresh, ra, dec, use_cache)
+            try:
+                return fut.result(timeout=config.SEARCH_STALE_WAIT) or old
+            except Exception:   # still asking (it carries on and is saved), or the archive failed
+                return old
+    return _fresh(ra, dec, use_cache)
+
+
+def _fresh(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
     key = (f"{ra:.4f}", f"{dec:+.4f}", use_cache)
     with _PENDING_LOCK:
         fut = _SEARCHING.get(key)

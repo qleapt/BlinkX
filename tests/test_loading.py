@@ -193,54 +193,98 @@ def test_background_loading_waits_for_the_page_the_user_waits_for_and_can_be_cal
     assert got == [] and stamps == [] and missing == 4
 
 
-def test_rtp_takes_the_spot_loaded_ahead_and_keeps_the_queue_full(monkeypatch):
-    loaded = []
-    monkeypatch.setattr(teleport, "_load", lambda spot, want: loaded.append((spot.text, want)))
-    q = []
+def _fresh_rtp(monkeypatch, tmp_path):
+    monkeypatch.setenv("SPHEREX_BLINK_CACHE", str(tmp_path))
+    for name, v in (("_WANT", {}), ("_QUEUED", set()), ("_DONE", set()), ("_BUSY", {1: 0, 2: 0})):
+        monkeypatch.setattr(teleport, name, v)
+
+
+def _drain():
+    teleport._JOBS.submit(lambda: None).result(10)   # every job queued before this one is done
+
+
+def test_rtp_keeps_a_stock_on_disk_and_takes_the_readiest_spot(monkeypatch, tmp_path):
+    _fresh_rtp(monkeypatch, tmp_path)
+    steps = []
+    exps = [Exposure("D4", 61000.0 + 200 * k + i, 61000.0 + 200 * k + i, f"e{k}-{i}", "v")
+            for k in range(2) for i in range(3)]
+    monkeypatch.setattr(teleport.archive, "search", lambda ra, dec: exps)
+    monkeypatch.setattr(teleport.archive, "saved", lambda ra, dec: exps)
+    monkeypatch.setattr(teleport.archive, "select", lambda es, b, quick=True, **k: {0: es[:3], 1: es[3:]})
+    monkeypatch.setattr(teleport.archive, "complete_future", lambda ra, dec: None)
+    have = set()
+    monkeypatch.setattr(cutouts, "is_cached", lambda e, *a: e.uri in have)
+
+    def fetch(todo, *a, **k):
+        steps.append(len(todo))
+        return [], len(todo)
+    monkeypatch.setattr(cutouts, "fetch_many", fetch)
     want = teleport.settings("blink", "D4", 5, False, False)
-    teleport.prepare(q, want, 2)
-    for s in q:
-        s.job.result(5)
-    assert len(q) == 2 and [t for t, _ in loaded] == [s.text for s in q]
-    first = q[0]
-    assert teleport.take(q) == first.text and first.want == ()    # used: its background work stops
-    assert targets.parse_coords(first.text) is not None
-    teleport.prepare(q, want, 2)
-    assert len(q) == 2
-    for s in q:
-        s.job.result(5)
-    loaded.clear()
-    other = teleport.settings("blink", "D6", 5, False, False)    # another band: the same spots, loaded again
-    teleport.prepare(q, other, 2)
-    for s in q:
-        s.job.result(5)
-    assert sorted(loaded) == sorted((s.text, other) for s in q)
-    assert targets.parse_coords(teleport.take([])) is not None   # nothing waiting: a fresh random spot
+    teleport.prepare(want, 3)
+    _drain()
+    spots = teleport.stock()
+    assert len(spots) == 3 and all(targets.parse_coords(s) for s in spots)   # saved: it survives a restart
+    assert steps == [2, 2, 2, 6]       # one photo per date of every spot first, then all of the next one
+    assert all(teleport.level(s, want) == 1 for s in spots)
+    have.update({"e0-0", "e1-0"})                                    # one per date at hand, for the second spot
+    ra1 = teleport._where(spots[1])[1]
+    monkeypatch.setattr(cutouts, "is_cached", lambda e, ra, *a: e.uri in have and ra == ra1)
+    assert teleport.level(spots[1], want) == 2
+    assert teleport.take(want) == spots[1]                           # the readiest one, not just the oldest
+    assert teleport.stock() == [spots[0], spots[2]]
+    steps.clear()
+    teleport.prepare(want, 3)                                        # topped up again; the others are not redone
+    _drain()
+    assert len(teleport.stock()) == 3 and steps == [2]                # only the new spot's first step
+    steps.clear()
+    teleport._WANT.clear()                                           # a restart: the stock is still there
+    assert teleport.take(want) in spots
+    teleport._WANT.clear()
+    teleport._save([])
+    assert targets.parse_coords(teleport.take(want)) is not None   # nothing waiting: a fresh random spot
 
 
-def test_a_spot_that_could_not_load_is_tried_again_later_unless_it_was_used(monkeypatch):
+def test_a_spot_that_could_not_load_is_tried_again_later_unless_it_was_used(monkeypatch, tmp_path):
+    _fresh_rtp(monkeypatch, tmp_path)
     monkeypatch.setattr(teleport, "RETRY_AFTER", 0.05)
     calls = []
 
-    def flaky(spot, want, stop):
-        calls.append(spot.text)
+    def flaky(text, want, stop):
+        calls.append(text)
         if len(calls) < 3:
             raise RuntimeError("archive unreachable")
-    monkeypatch.setattr(teleport, "_fill", flaky)
-    q = []
-    teleport.prepare(q, teleport.settings("blink", "D4", 5, False, False), 1)
+    monkeypatch.setattr(teleport, "_first", flaky)
+    monkeypatch.setattr(teleport, "_rest", lambda *a: None)
+    want = teleport.settings("blink", "D4", 5, False, False)
+    teleport.prepare(want, 1)
     t0 = time.time()
     while len(calls) < 3 and time.time() - t0 < 5:
         time.sleep(0.02)
     assert len(calls) == 3                                   # failed twice, loaded on the third try
+    _fresh_rtp(monkeypatch, tmp_path)
     calls.clear()
-    monkeypatch.setattr(teleport, "_fill", lambda spot, want, stop: calls.append(1) or 1 / 0)
-    q2 = []
-    teleport.prepare(q2, teleport.settings("blink", "D4", 5, False, False), 1)
-    q2[0].job.result(5)
-    teleport.take(q2)                                        # used: no more tries for it
+    monkeypatch.setattr(teleport, "_first", lambda text, want, stop: calls.append(1) or 1 / 0)
+    teleport.prepare(want, 1)
+    _drain()
+    teleport.take(want)                                      # used: no more tries for it
     time.sleep(0.3)
     assert calls == [1]
+
+
+def test_the_search_uses_an_old_list_when_the_archive_is_slow(monkeypatch, tmp_path):
+    monkeypatch.setenv("SPHEREX_BLINK_CACHE", str(tmp_path))
+    monkeypatch.setattr(config, "SEARCH_STALE_WAIT", 0.2)
+    import json as _json
+    old = [Exposure("D1", 61000.0, 61000.0, "old", "v")]
+    (tmp_path / "sia_10.0000_+20.0000.json").write_text(
+        _json.dumps({"t": time.time() - 40 * 3600, "rows": [dict(e.__dict__) for e in old]}))
+    gate = threading.Event()
+    monkeypatch.setattr(archive, "_search", lambda ra, dec, use_cache: gate.wait(5) or [])
+    t0 = time.time()
+    assert archive.search(10.0, 20.0) == old and time.time() - t0 < 1   # NASA slow: the saved list at once
+    gate.set()
+    monkeypatch.setattr(archive, "_search", lambda ra, dec, use_cache: [Exposure("D1", 1.0, 1.0, "new", "v")])
+    assert archive.search(10.0, 20.0)[0].uri == "new"                # NASA answering: the fresh list
 
 
 def test_rtp_settings_follow_what_each_view_loads():
@@ -306,3 +350,19 @@ def test_loading_screen_script_survives_streamlits_html_sanitizer():
     body = warp.SCRIPT.removeprefix("<script>").removesuffix("</script>")
     assert warp.SCRIPT.startswith("<script>") and warp.SCRIPT.endswith("</script>")
     assert not re.search(r"<[/\w!]", body)
+
+
+def test_the_loading_screens_count_down_and_the_motion_bar_shows_real_progress():
+    import re as _re
+    html = warp.card("Flying in", "", 2, 0.5, "3 of 8 photos", left=47.2, lid="L1")
+    m = _re.search(r'class="spx-eta" data-lid="L1" data-left="47.2"[^>]*>48 s left<', html)
+    assert m and 'data-fs="{} s left"' in html                   # the browser counts it down from there
+    assert 'data-left=""' in warp.card("x", "", 1, left=None, lid="L")   # no honest estimate: says so instead
+    assert "data-lid" not in warp.card("x", "", 1)               # no estimate yet: no countdown
+    bar = warp.bar_card("Measuring", "", 4, 0.8, "5 of 9 photos measured", left=2.0, lid="L2")
+    assert "spx-bar" in bar and 'aria-valuenow="80"' in bar and "width:80.0%" in bar and "2 s left" in bar
+    assert bar.count('class="done"') == 4 and bar.count('class="now"') == 1
+    assert abs(sum(warp.MOTION_WEIGHTS) - 1) < 1e-9 and len(warp.MOTION_WEIGHTS) == len(warp.MOTION_STAGES)
+    assert warp.eta_text(125) == "2 min left" and warp.eta_text(0) == "almost done"
+    body = warp.SCRIPT.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+    assert "spx-eta" in body and not _re.search(r"<[/\w!]", body)   # survives st.html's sanitizer

@@ -260,16 +260,13 @@ def _pick(name):
 
 _init()
 if targets.is_teleport(ss.get("target_text", "")):   # /RTP: a random spot on the sky, written back as RA Dec
-    ss.target_text = teleport.take(ss.setdefault("_rtp_q", []))   # loaded ahead in the background when possible
+    ss.target_text = teleport.take(teleport.settings(ss.mode, ss.band, ss.fov, ss.gaia, ss.survey))  # loaded ahead
     ss["_rtp"] = ss.target_text
-    ss["_rtp_used"] = True
 
 
 def _teleport_ahead():
-    """Pick the next /RTP spots and load them quietly in the background, for the current view settings."""
-    want = teleport.settings(ss.mode, ss.band, ss.fov, ss.gaia, ss.survey)
-    ahead = config.TELEPORT_AHEAD if ss.get("_rtp_used") and want[0] != "spectrum" else 1
-    teleport.prepare(ss.setdefault("_rtp_q", []), want, ahead)
+    """Keep the next /RTP spots ready (on disk), loading them quietly in the background for the current view."""
+    teleport.prepare(teleport.settings(ss.mode, ss.band, ss.fov, ss.gaia, ss.survey))
 
 
 def _input_hint(text):
@@ -371,49 +368,89 @@ def search(ra, dec):  # cached on disk by archive.search (fast list first, compl
     return archive.search(ra, dec)
 
 
-class Loader:
-    """The star-field loading screen (spx/warp.py) with the current step, in the middle of the page. It appears only
-    when there is something to wait for: a step that asks NASA's archive (slow=True), or a page that has already
-    taken config.LOADER_AFTER. What is at hand (a band or view loaded ahead, a display change) shows with no screen."""
+_SAME = object()
 
-    def __init__(self):
+
+class Loader:
+    """The loading screen with the current step and the time left, counting down every second. It appears only when
+    there is something to wait for: a step that asks NASA's archive (slow=True), or a page that has already taken
+    config.LOADER_AFTER. What is at hand (a band or view loaded ahead, a display change) shows with no screen.
+
+    Two looks: the star-field flight (spx/warp.py card), and for the Motion check (bar=True) one progress bar for the
+    whole check, download to fitted path, with its steps. left: seconds still to wait for the whole page (None: no
+    honest estimate, it says so; False: no countdown yet); the steps after the current one are included."""
+
+    def __init__(self, bar=False):
         self.box, self.t0 = st.empty(), time.time()
         self.title, self.detail, self.stage, self.frac, self.ptext = "", "", 0, None, ""
-        self.shown = False
+        self.shown, self.bar = False, bar
+        self.est = eta.Estimator()
+        self.left, self.lid, self.overall = False, f"{self.t0:.3f}", 0.0
+        self.tail = self.est.usual("motion") if bar else 0.0   # the motion analysis after the photos
+
+    def _set_left(self, left):
+        if left is _SAME:
+            return
+        if left is None or left is False:
+            self.left = left
+        else:
+            self.left = max(0.0, left) + (self.tail if self.stage < 4 else 0.0)
 
     def _draw(self, now=False):
         if not (now or self.shown or time.time() - self.t0 > config.LOADER_AFTER):
             return
         self.shown = True
-        T = lambda s: i18n.tr(s, ss.lang)  # noqa: E731  (the card is HTML, so it is translated here)
-        self.box.markdown(warp.card(T(self.title), T(self.detail), self.stage, self.frac, T(self.ptext),
-                                    stages=[T(s) for s in warp.STAGES]), unsafe_allow_html=True)
+        T = lambda s: " · ".join(i18n.tr(p, ss.lang) for p in s.split(" · "))  # noqa: E731
+        # (the card is HTML, so it is translated here, part by part: "3 of 12 photos · 14 s so far")
+        words = dict(fs=T("{} s left"), fm=T("{} min left"), soon=T("almost done"), slow=T("taking longer than usual"),
+                     now=T(warp.eta_text(self.left)) if self.left is not False else "")
+        if self.bar:
+            w = warp.MOTION_WEIGHTS
+            k = min(self.stage, len(w))
+            self.overall = max(self.overall, sum(w[:k]) + (w[k] * (self.frac or 0.0) if k < len(w) else 0.0))
+            html = warp.bar_card(T(self.title), T(self.detail), self.stage, self.overall, T(self.ptext),
+                                 stages=[T(s) for s in warp.MOTION_STAGES], left=self.left, lid=self.lid, words=words)
+        else:
+            html = warp.card(T(self.title), T(self.detail), self.stage, self.frac, T(self.ptext),
+                             stages=[T(s) for s in warp.STAGES], left=self.left, lid=self.lid, words=words)
+        self.box.markdown(html, unsafe_allow_html=True)
 
-    def step(self, title, detail="", stage=0, slow=False):
+    def step(self, title, detail="", stage=0, slow=False, left=_SAME):
         if stage != self.stage:
             self.frac, self.ptext = None, ""
         self.title, self.detail, self.stage = title, detail, stage
+        self._set_left(left)
         self._draw(slow)
 
-    def progress(self, frac, text):
-        if (min(1.0, frac), text) != (self.frac, self.ptext):
-            self.frac, self.ptext = min(1.0, frac), text
+    def progress(self, frac, text, left=_SAME):
+        old = (self.frac, self.ptext, self.left)
+        self.frac, self.ptext = min(1.0, frac), text
+        self._set_left(left)
+        if (self.frac, self.ptext, self.left) != old:
             self._draw()
 
-    def note(self, text):
+    def note(self, text, left=_SAME):
         """A line under the steps without a progress bar (e.g. how long we have been waiting)."""
-        if text != self.ptext:
-            self.ptext = text
+        old = (self.ptext, self.left)
+        self.ptext = text
+        self._set_left(left)
+        if (self.ptext, self.left) != old:
             self._draw()
 
     def done(self, arrive=True):
         secs = time.time() - self.t0
         if self.shown:
-            if arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out. The browser keeps
-                self.stage = 4         # that going by itself (warp.SCRIPT) while the photos are drawn underneath
+            if self.bar and arrive:   # the bar fills up in a snap, then the check is there
+                self.title, self.detail, self.ptext = "Motion check ready", "", ""
+                self.stage, self.frac, self.left = len(warp.MOTION_STAGES), 1.0, False
+                self._draw()
+                time.sleep(0.15)
+            elif arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out. The browser keeps
+                self.stage = 4           # that going by itself (warp.SCRIPT) while the photos are drawn underneath
                 self._draw()
                 time.sleep(warp.HANDOVER)
             self.box.empty()
+            self.shown = False
         _teleport_ahead()   # the waiting is over: get the next /RTP spots ready in the background
         return secs
 
@@ -430,13 +467,17 @@ with st.expander(f"How to use {MODE_LABEL[ss.mode]} (30 seconds)"):
     st.markdown(HOW_TO[ss.mode])
     st.caption("Hover over the small question-mark icons for short explanations; *Words used here* in the sidebar "
                "explains the astronomy terms.")
-load = Loader()
+load = Loader(bar=ss.mode == "motion")
 _known = ss.setdefault("_resolved", set())   # names looked up already (answered from memory)
+_lookup = not (targets.preset(ss.target_text) or targets.parse_coords(ss.target_text) or ss.target_text in _known)
 load.step("Finding your target…", "Reading the position you typed, or looking the name up in the SIMBAD catalogue", 0,
-          slow=not (targets.preset(ss.target_text) or targets.parse_coords(ss.target_text)
-                    or ss.target_text in _known))
+          slow=_lookup, left=load.est.usual("resolve") + load.est.usual("search") + load.est.usual("fetch")
+          if _lookup else False)
 try:
+    _t_resolve = time.time()
     tgt = resolve(ss.target_text)
+    if _lookup and time.time() - _t_resolve > 0.3:
+        load.est.learn_step("resolve", time.time() - _t_resolve)
     _known.add(ss.target_text)
 except targets.TargetNotFound:
     load.done(arrive=False)
@@ -462,27 +503,18 @@ fut_survey = (_bg.submit(catalogs.survey_frames, round(ra0, 5), round(dec0, 5), 
               if ss.survey and ss.mode in ("blink", "sub", "motion") else None)
 _bg.shutdown(wait=False)
 
-def waiting(t0, what="", step=None, estimate=None):
-    """Plain words for the loading card: how long we have waited, how long is probably left, and why when it is
-    long. estimate: words for the time left (downloads); step: a step whose usual length was learned (search)."""
+def waiting(t0, what=""):
+    """Plain words for the loading card: how long we have waited, and why when it is long (the time left is the
+    countdown above it)."""
     el = time.time() - t0
-    left = eta.Estimator().step_left(step, el) if step else None
-    if estimate:
-        extra = f" · {estimate}" + (" · NASA's servers or the connection are slow right now: it keeps trying, and "
-                                    "whatever arrives is saved, so the next visit is fast" if el > 12 else "")
-    elif step and left is not None:
-        extra = f" · {eta.words(left)}"
-    elif el > 12:
-        extra = (" · NASA's servers or the connection are slow right now: it keeps trying, and whatever arrives is "
-                 "saved, so the next visit is fast")
-    else:
-        extra = " · taking longer than usual" if step else ""
-    return what + f"{el:.0f} s" + extra
+    return what + f"{el:.0f} s so far" + (" · NASA's servers or the connection are slow right now: it keeps trying, "
+                                          "and whatever arrives is saved, so the next visit is fast" if el > 12 else "")
 
 
 _searched = archive.is_cached(round(ra0, 4), round(dec0, 4))
 load.step("Asking NASA's archive which photos cover this spot…",
-          "SPHEREx has photographed every part of the sky several times since 2025", 1, slow=not _searched)
+          "SPHEREx has photographed every part of the sky several times since 2025", 1, slow=not _searched,
+          left=(0.2 if _searched else load.est.usual("search")) + load.est.usual("fetch"))
 if not _searched:      # a new spot: the photos come right after the search,
     cutouts.warm()     # so their connections open while the archive answers
 try:
@@ -496,7 +528,10 @@ try:
                 eta.Estimator().learn_step("search", time.time() - _t_search)   # better estimates next time
             break
         except FutureTimeout:
-            load.note(waiting(_t_search, step="search"))
+            _el = time.time() - _t_search
+            _sl = load.est.step_left("search", _el)
+            load.progress(min(0.95, _el / (_el + _sl)) if _sl is not None else 0.95, waiting(_t_search),
+                          left=None if _sl is None else _sl + load.est.usual("fetch"))
 except archive.ArchiveBusy:
     load.done(arrive=False)
     st.warning("The NASA/IPAC archive is busy right now. Please try again in a minute.")
@@ -528,15 +563,22 @@ def fetch(todo, label, group_of=None, lineup=True):
             if k not in done_k:
                 lead.setdefault(k, e.uri)
         lead_uris = set(lead.values())
-    est = eta.Estimator()
-    first = est.start(len(todo) - n_cached, n_cached) + eta.ALIGN_SECONDS * len(todo)
-    load.progress(0.0, f"0 of {len(todo)} photos · {eta.words(first)}")
+    est = load.est
+    # the page is shown once every date has a photo: the countdown runs to then, not to the last photo
+    new_needed = len(lead_uris) if lead_uris is not None else len(todo) - n_cached
+    target = max(1, n_cached + new_needed)
+    rest_new = len(todo) - n_cached - new_needed > 0
+    align = eta.ALIGN_SECONDS * target if lineup else 0.0
+    soft = config.FETCH_SOFT_DEADLINE if group_of and rest_new else 0.0
+    left0 = max(est.start(new_needed, n_cached), soft) + align
+    load.progress(0.0, f"0 of {len(todo)} photos", left=left0)
     t_fetch = time.time()
 
     def progress(d, n):
-        left = est.update(d, n, time.time() - t_fetch)
-        left = None if left is None else left + eta.ALIGN_SECONDS * n
-        load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · ", estimate=eta.words(left)))
+        el = time.time() - t_fetch
+        left = est.update(min(d, target), target, el)
+        left = None if left is None else max(left, soft - el) + align
+        load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · "), left=left)
     out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45, progress,
                                     deadline=config.FETCH_SOFT_DEADLINE if group_of else None,
                                     enough=enough, stats=stats, first=lead_uris)
@@ -547,9 +589,12 @@ def fetch(todo, label, group_of=None, lineup=True):
         st.stop()
     ss["_skipped"] = stats.get("skipped", 0)
     est.learn(max(0, len(out) - n_cached), time.time() - t_fetch)   # better estimates next time
+    if n_cached < len(todo):
+        est.learn_step("fetch", time.time() - t_fetch)
     load.progress(1.0, f"{len(out)} photos" + (f" ({nfail} failed)" if nfail else ""))
     load.step("Lining the photos up…", "Turning every photo north-up on one grid and averaging each epoch", 3,
-              slow=lineup and len(out) > 40)   # 'Load all': a second or so of work
+              slow=lineup and len(out) > 40,   # 'Load all': a second or so of work
+              left=eta.ALIGN_SECONDS * len(out) if lineup else 0.0)
     return out
 
 
@@ -849,8 +894,8 @@ def pending_notes():
     """Say so when part of the data is still arriving over a slow connection; redraw when it has."""
     msgs = []
     if ss.get("_skipped"):
-        msgs.append(f"{ss['_skipped']} more SPHEREx photos are still on their way; each epoch already has at "
-                    "least one")
+        msgs.append(f"{ss['_skipped']} more SPHEREx photos are still on their way (__LEFT__); each epoch already "
+                    "has at least one")
     if survey_pending:
         msgs.append("the older WISE (2010) / 2MASS (~2000) photos are still downloading")
     if gaia_pending:
@@ -862,17 +907,30 @@ def pending_notes():
     akey = f"_auto|{tgt.name}|{band}|{ss.fov}"
     t_first = ss.setdefault(akey + "|t", time.time())
     t_wait = time.time()
+    per = eta.Estimator().per_photo
+    clock = dict(end=t_wait + per * len(missing), n=len(missing))   # when the last one should be in
 
     @st.fragment(run_every=config.REFRESH_EVERY)
     def watch():  # checks every second; redraws the whole page once everything still missing has arrived
+        still = [e for e in missing if not cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45)]
         arrived = ((not survey_pending or fut_survey is None or fut_survey.done())
-                   and (not gaia_pending or fut_gaia is None or fut_gaia.done())
-                   and all(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in missing))
+                   and (not gaia_pending or fut_gaia is None or fut_gaia.done()) and not still)
         if arrived and ss.get(akey, 0) < 5 and time.time() - t_first < 600:
             ss[akey] = ss.get(akey, 0) + 1
             st.rerun()
-        if time.time() - t_wait > 3:   # a note only when it takes a while (usually it is over within a second or two)
-            st.info("" + "; ".join(msgs) + ". They are added here automatically as soon as they arrive.")
+        now = time.time()
+        if still and len(still) < clock["n"]:   # some came in: the speed seen so far says when the rest will be
+            got = len(missing) - len(still)
+            end = now + len(still) * (now - t_wait) / got
+            if end < clock["end"] or end - clock["end"] > 3:
+                clock["end"] = end
+            clock["n"] = len(still)
+        left = clock["end"] - now
+        when = (f"about {round(left / 60)} min left" if left > 89 else f"{int(left) + 1} s left" if left > 0
+                else "any moment now")
+        if now - t_wait > 3:   # a note only when it takes a while (usually it is over within a second or two)
+            st.info("; ".join(msgs).replace("__LEFT__", when)
+                    + ". They are added here automatically as soon as they arrive.")
     watch()
 
 
@@ -929,11 +987,17 @@ def motion_check(t, note=""):
         de = ((r - r_ref + 180) % 360 - 180) * np.cos(np.radians(d_ref)) * 3600
         return float(de), float((d - d_ref) * 3600)
 
+    t_motion = time.time()
+    usual = load.est.usual("motion")
+    load.step("Measuring where the object is in each photo…", "The centre of its light on every date", 4,
+              left=usual)
     st.subheader(f"Motion check: {t.name} in {band}")
     if note:
         st.caption(note)
     pts = []
-    for f in frames:
+    for i_f, f in enumerate(frames):
+        load.progress(i_f / max(1, len(frames)), f"{i_f} of {len(frames)} photos measured",
+                      left=max(0.1, usual - (time.time() - t_motion)))
         r, d = targets.position_at(t, f.mjd_mid)
         par = targets.predicted_offsets(t, [f.mjd_mid], config.REFERENCE_MJD)[0] - \
             targets.predicted_offsets(t, [f.mjd_mid], config.REFERENCE_MJD, with_parallax=False)[0]
@@ -956,7 +1020,11 @@ def motion_check(t, note=""):
                         label=f.label.split(" · ")[0] if k == 0 else f"Epoch {k}", epoch=k, mjd=f.mjd_mid,
                         date=targets.mjd_to_date(f.mjd_mid), de=de, dn=dn, err=err,
                         off=float(np.hypot(de - pe, dn - pn)), par_e=par[0], par_n=par[1], pred_e=pe, pred_n=pn))
+    load.step("Fitting its path and working out what it is…",
+              "All positions together: standing still, drifting, wobbling or curving", 5,
+              left=max(0.1, usual - (time.time() - t_motion)))
     if len(pts) < 2:
+        load.done()
         st.info("The object needs to be visible in at least two photos. Try a band where it is bright, or a "
                 "larger field of view.")
         return
@@ -1004,6 +1072,8 @@ def motion_check(t, note=""):
     mcls = motion.classify(obs, mfit, gaia=dict(pm=(t.pmra, t.pmdec), who="The catalogue",
                                                  text=f"{t.name} is in the catalogue ({t.source})")
                            if t.source != "coordinates" else None)
+    load.progress(0.9, "", left=0.1)
+    load.est.learn_step("motion", time.time() - t_motion)
     st.markdown("---")
     st.markdown(f"#### What SPHEREx's own measurements say about {t.name}")
     st.caption("The same analysis as for your own finds: all measured positions fitted together, the kind of object "
@@ -1048,6 +1118,7 @@ def motion_check(t, note=""):
                            f"motion_{t.name.replace(' ', '_')}_{band}.csv", help="Save the step-by-step numbers.")
     with st.expander("Watch it move: the photos with the predicted position (orange ring) on each date"):
         sky_viewer(frames, key_extra=f"motion|{t.name}", follow=t)
+    load.done()   # the whole check is on the page: the bar fills up and goes
 
 
 def photo_of(m):
@@ -1444,9 +1515,12 @@ def track_check(marks):
 
 
 if ss.mode == "motion":
-    load_secs = load.done()
-    prefetch.start(tgt, ra0, dec0, ss.fov, band, exps, survey=fut_survey is not None)   # the other bands, ahead
     f_ = ss.get("find") or {}
+    if (f_.get("field") == tgt.name and f_.get("marks")) or tgt.source == "coordinates":
+        load_secs = load.done()
+    else:   # the bar stays up through the analysis: motion_check closes it
+        load_secs = time.time() - load.t0
+    prefetch.start(tgt, ra0, dec0, ss.fov, band, exps, survey=fut_survey is not None)   # the other bands, ahead
     if f_.get("field") == tgt.name and f_.get("marks"):
         st.button(f"Back to {tgt.name}" if tgt.source != "coordinates" else "Back", on_click=_drop_find,
                   help="Forget these marks and show the usual motion check.")

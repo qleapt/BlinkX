@@ -531,6 +531,16 @@ TR.update({
         "astronomi terimlerini açıklar.",
     "about {} s left": "yaklaşık {} sn kaldı", "about {} min left": "yaklaşık {} dk kaldı",
     "almost done": "neredeyse bitti", "{} of {} photos": "{} / {} fotoğraf",
+    "{} s left": "{} sn kaldı", "{} min left": "{} dk kaldı", "{} s so far": "{} sn geçti",
+    "{} of {} photos measured": "{} / {} fotoğraf ölçüldü",
+    "Measure positions": "Konumları ölç", "Fit & classify": "Yol ve tür",
+    "Measuring where the object is in each photo…": "Cismin her fotoğraftaki yeri ölçülüyor…",
+    "The centre of its light on every date": "Işığının merkezi, her tarihte",
+    "Fitting its path and working out what it is…": "Yolu çiziliyor ve ne olduğu bulunuyor…",
+    "All positions together: standing still, drifting, wobbling or curving": "Tüm konumlar birlikte: duruyor mu, kayıyor mu, salınıyor mu, kıvrılıyor mu",
+    "Motion check ready": "Hareket denetimi hazır",
+    "{} more SPHEREx photos are still on their way ({}); each epoch already has at least one":
+        "{} SPHEREx fotoğrafı daha yolda ({}); her dönemde zaten en az bir tane var",
     "taking longer than usual": "her zamankinden uzun sürüyor",
     "under {}″/h": "{}″/sa altında", "under {}″/min": "{}″/dk altında",
     "No motion between the positions ({} apart): they agree within the measuring error (any motion is below {} at "

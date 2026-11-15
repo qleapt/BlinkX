@@ -19,6 +19,9 @@ import html as _html
 import json as _json
 
 STAGES = ["Find target", "Search NASA archive", "Download photos", "Line up & average"]
+MOTION_STAGES = STAGES + ["Measure positions", "Fit & classify"]
+# Motion check's progress bar: the share of the whole wait each step usually takes (they add up to 1)
+MOTION_WEIGHTS = [0.04, 0.14, 0.52, 0.10, 0.14, 0.06]
 HANDOVER = 0.08   # s between showing stage 4 and removing the card: enough for the browser to see it arrive
 
 CSS = """<style>
@@ -39,6 +42,25 @@ CSS = """<style>
 .spx-prog{height:4px;margin-top:9px;border-radius:2px;background:#20263a;overflow:hidden}
 .spx-prog i{display:block;height:100%;background:linear-gradient(90deg,#4a6cff,#9fd8ff);transition:width .3s ease}
 .spx-prog-t{font-size:.74rem;color:#7d869b;margin-top:3px;min-height:1em}
+.spx-eta{display:block;margin:6px 0 2px;font-size:1.5rem;font-weight:650;color:#eef1f7;
+  font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.spx-eta.slow{font-size:.95rem;font-weight:500;color:#ffcf66}
+.spx-bar{position:fixed;inset:0;z-index:1000002;display:flex;align-items:center;justify-content:center;
+  background:rgba(4,7,16,.84);backdrop-filter:blur(5px);animation:spx-in .2s ease .15s both}
+.spx-bar-card{width:min(560px,92%);padding:20px 22px 16px;border-radius:12px;background:#0b1020;
+  border:1px solid #2c3346;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.spx-bar-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.spx-bar-card h4{margin:0;padding:0;font-size:1.02rem;color:#eef1f7}
+.spx-bar-card .spx-eta{margin:0;font-size:1.25rem;white-space:nowrap}
+.spx-bar-card p{margin:4px 0 0;color:#a7afc0;font-size:.86rem}
+.spx-bar-track{height:12px;margin-top:14px;border-radius:6px;background:#1b2133;overflow:hidden}
+.spx-bar-track i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#4a6cff,#9fd8ff);
+  transition:width .16s cubic-bezier(.2,.9,.25,1)}
+.spx-bar-row{display:flex;justify-content:space-between;gap:10px;margin-top:5px;font-size:.78rem;color:#7d869b;
+  font-variant-numeric:tabular-nums}
+.spx-bar-row b{color:#cfd6e6;font-weight:600}
+.spx-bar .spx-steps{justify-content:flex-start;margin-top:12px}
+@media (prefers-reduced-motion: reduce){.spx-bar-track i{transition:none}}
 </style>"""
 
 SCRIPT = r"""<script>
@@ -85,6 +107,27 @@ SCRIPT = r"""<script>
     }
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["data-stage"]});
 
+  // The time left counts down every second by itself between the app's updates. A new estimate that is sooner is
+  // taken at once; one that is only a little later is absorbed, so the count never jumps back by a second or two.
+  const E = W.eta = {key: "", lid: "", end: 0};
+  setInterval(() => {
+    const el = document.querySelector(".spx-eta[data-lid]");
+    if (!el) { E.lid = ""; return; }
+    const now = Date.now(), raw = el.dataset.left || "";
+    if (raw === "") { E.lid = el.dataset.lid; return; }   // no honest estimate: the app's words stay
+    const key = el.dataset.lid + "|" + raw;
+    if (key !== E.key) {
+      E.key = key;
+      const end = now + parseFloat(raw) * 1000;
+      if (E.lid !== el.dataset.lid || end - E.end > 2500 || E.end - end > 0) E.end = end;
+      E.lid = el.dataset.lid;
+    }
+    const sec = Math.ceil((E.end - now) / 1000);
+    const txt = sec - 89 > 0 ? el.dataset.fm.replace("{}", Math.round(sec / 60)) :
+      sec > 0 ? el.dataset.fs.replace("{}", sec) : el.dataset.soon;
+    if (el.textContent !== txt) el.textContent = txt;
+  }, 200);
+
   function frame(now) {
     const host = document.querySelector(".spx-warp:not(.spx-ghost)") || ghost;
     if (!host) { W.last = 0; W.fade = 1; W.speed = 0.25; next(200); return; }
@@ -129,14 +172,56 @@ SCRIPT = r"""<script>
 </script>""".replace("__CSS__", _json.dumps(CSS.replace("<style>", "").replace("</style>", "")))
 
 
+def eta_text(left: float | None) -> str:
+    """The countdown's words, in English (the app translates them): '48 s left', '2 min left', 'almost done'."""
+    if left is None:
+        return "taking longer than usual"
+    sec = int(-(-left // 1))
+    return f"{round(sec / 60)} min left" if sec > 89 else f"{sec} s left" if sec > 0 else "almost done"
+
+
+def default_words(left=None) -> dict:
+    """The countdown's words (the app passes them translated): fs / fm with {} for the number."""
+    return dict(fs="{} s left", fm="{} min left", soon="almost done", slow="taking longer than usual",
+                now=eta_text(left))
+
+
+def _eta(left, lid, words):
+    """The time-left element; the script counts it down every second."""
+    if left is None:
+        return f'<span class="spx-eta slow" data-lid="{lid}" data-left="">{_html.escape(words["slow"])}</span>'
+    return (f'<span class="spx-eta" data-lid="{lid}" data-left="{max(0.0, left):.1f}" '
+            f'data-fs="{_html.escape(words["fs"])}" data-fm="{_html.escape(words["fm"])}" '
+            f'data-soon="{_html.escape(words["soon"])}">{_html.escape(words["now"])}</span>')
+
+
+def _steps(stage, stages):
+    return "".join(f'<span class="{"done" if i < stage else "now" if i == stage else ""}">{i + 1}. {s}</span>'
+                   for i, s in enumerate(stages))
+
+
 def card(title: str, detail: str = "", stage: int = 0, frac: float | None = None, prog_text: str = "",
-         stages=None) -> str:
-    """The placeholder the script draws into, with the text on top. stage 0-3 = working, 4 = done."""
-    steps = "".join(f'<span class="{"done" if i < stage else "now" if i == stage else ""}">{i + 1}. {s}</span>'
-                    for i, s in enumerate(stages or STAGES))
+         stages=None, left=False, lid: str = "", words: dict | None = None) -> str:
+    """The placeholder the script draws into, with the text on top. stage 0-3 = working, 4 = done.
+    left: seconds left for the whole wait (None: no honest estimate; False: no countdown)."""
     bar = (f'<div class="spx-prog"><i style="width:{max(0.0, min(1.0, frac)) * 100:.1f}%"></i></div>'
            if frac is not None else "")
+    eta = _eta(left, lid, words or default_words(left)) if left is not False and stage < 4 else ""
     return (f'{CSS}<div class="spx-warp" data-stage="{int(stage)}" role="status" aria-live="polite">'
-            f'<div class="spx-card"><h4>{_html.escape(title)}</h4><p>{_html.escape(detail)}</p>'
-            f'<div class="spx-steps">{steps}</div>{bar}<div class="spx-prog-t">{_html.escape(prog_text)}</div>'
-            f'</div></div>')
+            f'<div class="spx-card"><h4>{_html.escape(title)}</h4>{eta}<p>{_html.escape(detail)}</p>'
+            f'<div class="spx-steps">{_steps(stage, stages or STAGES)}</div>{bar}'
+            f'<div class="spx-prog-t">{_html.escape(prog_text)}</div></div></div>')
+
+
+def bar_card(title: str, detail: str, stage: int, overall: float, prog_text: str = "", stages=None,
+             left=False, lid: str = "", words: dict | None = None) -> str:
+    """Motion check's loading screen: one progress bar for the whole check (download, measuring, fitting), its
+    steps and the time left. overall: 0-1 of the whole check."""
+    pct = max(0.0, min(1.0, overall)) * 100
+    eta = _eta(left, lid, words or default_words(left)) if left is not False else ""
+    return (f'{CSS}<div class="spx-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" '
+            f'aria-valuenow="{pct:.0f}" aria-label="{_html.escape(title)}"><div class="spx-bar-card">'
+            f'<div class="spx-bar-head"><h4>{_html.escape(title)}</h4>{eta}</div><p>{_html.escape(detail)}</p>'
+            f'<div class="spx-bar-track"><i style="width:{pct:.1f}%"></i></div>'
+            f'<div class="spx-bar-row"><b>{pct:.0f}%</b><span>{_html.escape(prog_text)}</span></div>'
+            f'<div class="spx-steps">{_steps(stage, stages or MOTION_STAGES)}</div></div></div>')

@@ -77,11 +77,14 @@ HEDGE_AFTER = 5.0          # s: also ask IRSA when the AWS read is this slow (di
 SEARCH_HEDGE_AFTER = 2.5   # s: ask the SIA search again when an answer is this slow (it usually takes 1-3 s,
                            # but now and then 7-30 s: a second request then usually answers first)
 SEARCH_TRIES = 3           # SIA requests per collection (staggered) before falling back to TAP
-# /RTP: the next random spots are picked ahead of time and loaded quietly in the background, so a jump lands
-# at once. Background loading pauses while a load you are waiting for runs, and uses few connections.
-TELEPORT_AHEAD = 2         # spots kept ready once /RTP has been used in a session (one before that)
+SEARCH_STALE_WAIT = 2.0    # s: a spot searched before (over 12 h ago) waits this long for a fresh list, then uses
+                           # the saved one; the fresh search carries on and is saved for next time
+# /RTP: random spots are picked ahead of time and loaded quietly in the background, so a jump lands at once. The
+# spots ready to jump to are kept on disk (rtp_stock.json), so they survive a restart. Background loading pauses
+# while a load you are waiting for runs, and uses few connections.
+TELEPORT_AHEAD = 3         # spots kept ready (the archive's list and one photo per date each; the next one fully)
 BG_STAMPS = 3              # photos loaded side by side in the background
-BG_S3_CONCURRENT = 8       # AWS requests at once for background loading (the page you look at gets the rest)
+BG_S3_CONCURRENT = 6       # AWS requests at once for background loading (the page you look at gets the rest)
 FETCH_SOFT_DEADLINE = 1.5  # s: then show what has arrived if every epoch has an image (one photo per epoch is
                            # loaded first); the rest keep arriving and the page fills them in by itself
 LOADER_AFTER = 0.4         # s: the loading screen only appears for a wait: NASA's archive asked, or a page this slow
