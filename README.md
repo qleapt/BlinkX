@@ -98,11 +98,13 @@ Embed in another page:
    Everything is cached on disk. A target never seen before loads in about 7–10 s (≈ 65 s before these changes);
    the all-band spectrum in about 13 s. Each photo takes three round trips to AWS (the places of the VARIANCE
    and ZODI layers follow from the file's length, learned once per detector), and the connections open while the
-   archive search runs. For `/RTP` three random spots are kept ready on disk (`rtp_stock.json`, filled from the
-   first page on and kept across restarts): first the archive's list and one photo per date of each, then
-   everything for the next one, before the other bands' far end and the spectrum. A jump takes the readiest
-   spot and lands in about 2 s, even on a slow connection; that background work pauses while a load you are
-   waiting for runs. A spot searched more than 12 h ago waits at most 2 s for NASA's archive and otherwise uses
+   archive search runs. For `/RTP` twenty random spots are kept ready on disk (`rtp_stock.json`, a new set each
+   time the app starts): first the archive's list and one photo per date of each, then everything for the next
+   three, before the other bands' far end and the spectrum. A jump takes the readiest spot and lands at once,
+   even on a slow connection; until the new set is ready, a ready spot from the last run that was never jumped
+   to stands in, a spot just visited never comes back, and a spot without photos jumps on to another. That
+   background work pauses while a load you are waiting for runs. A spot whose dates all have a photo opens with
+   no loading screen and fills in the rest quietly; "Load all" waits once and shows every photo together. A spot searched more than 12 h ago waits at most 2 s for NASA's archive and otherwise uses
    its saved list, so a slow or failing archive never holds a known spot. Once a view is on screen, the other five bands of the same spot are loaded and
    lined up the same way (nearest band first, then the spectrum's photos) and handed to the browser, so a band
    chosen in the sidebar appears in the same frame. A spot never seen before is shown as soon as every date
@@ -170,6 +172,11 @@ tests/              pytest on synthetic data
 - WISE All-Sky single-exposure images and 2MASS images: IRSA.
 - Target names: SIMBAD, CDS Strasbourg (the app falls back to the official CfA and IDIA mirrors when the main
   site is down, as it was on 14 Nov 2026).
+
+## License
+
+MIT, see [LICENSE](LICENSE). The SPHEREx, WISE, 2MASS and Gaia data the app shows are not part of this
+repository: they are fetched from their archives and keep their own terms (see *Data and credits*).
 
 ## Use of AI
 
