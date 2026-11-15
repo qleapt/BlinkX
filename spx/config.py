@@ -146,6 +146,3 @@ def cache_dir() -> Path:
     p.mkdir(parents=True, exist_ok=True)
     _seed_cache(p)
     return p
-        p = Path(tempfile.gettempdir()) / "spherex-blink-cache"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
