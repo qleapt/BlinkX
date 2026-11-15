@@ -6,7 +6,10 @@ SPHEREx release changes the table names.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+import threading
+import zipfile
 from pathlib import Path
 
 # --- Archive -------------------------------------------------------------------
@@ -107,6 +110,28 @@ TAP_CACHE_HOURS = 12
 SIA_CACHE_HOURS = 12        # fast exposure list; the complete TAP list replaces it when ready
 REFERENCE_MJD = 61041.0     # 2026-01-01: cutouts are centred on the target at this date
 CACHE_VERSION = 1           # bump to invalidate processed stamps
+_SEED_LOCK = threading.Lock()
+_SEEDED: set[Path] = set()
+
+
+def _seed_cache(p: Path) -> None:
+    """Populate a fresh cache with bundled index JSONs so challenge targets and /RTP work if IRSA is down."""
+    if p in _SEEDED or "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    with _SEED_LOCK:
+        if p in _SEEDED:
+            return
+        seed = Path(__file__).resolve().parent / "data" / "seed_cache.zip"
+        if seed.exists():
+            try:
+                with zipfile.ZipFile(seed) as z:
+                    for name in z.namelist():
+                        dst = p / Path(name).name
+                        if not dst.exists():
+                            dst.write_bytes(z.read(name))
+            except OSError:
+                pass
+        _SEEDED.add(p)
 
 
 def cache_dir() -> Path:
@@ -117,6 +142,10 @@ def cache_dir() -> Path:
     elif os.environ.get("LOCALAPPDATA"):
         p = Path(os.environ["LOCALAPPDATA"]) / "spherex-blink" / "cache"
     else:
+        p = Path(tempfile.gettempdir()) / "spherex-blink-cache"
+    p.mkdir(parents=True, exist_ok=True)
+    _seed_cache(p)
+    return p
         p = Path(tempfile.gettempdir()) / "spherex-blink-cache"
     p.mkdir(parents=True, exist_ok=True)
     return p
