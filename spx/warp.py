@@ -1,4 +1,4 @@
-"""Loading screen: a flight through a star field, drawn on a canvas where the photos will appear.
+"""Loading screen: a flight through a star field over the whole window, gone once the photos are ready.
 
 Streamlit rebuilds a markdown block whenever its text changes, which would restart any animation
 inside it. So the animation is split in two:
@@ -16,14 +16,15 @@ import html as _html
 STAGES = ["Find target", "Search NASA archive", "Download photos", "Line up & average"]
 
 CSS = """<style>
-.spx-warp{position:relative;height:440px;margin:6px 0;border-radius:16px;overflow:hidden;border:1px solid #23283a;
+.spx-warp{position:fixed;inset:0;z-index:1000002;overflow:hidden;
   background:radial-gradient(ellipse at 50% 42%,#101a3c 0%,#060a18 50%,#020308 85%);
-  animation:spx-in .35s ease .25s both}
+  animation:spx-in .35s ease .25s both;transition:opacity .45s ease}
 @keyframes spx-in{from{opacity:0}to{opacity:1}}
 .spx-warp canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-.spx-card{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);width:min(560px,92%);padding:14px 18px 12px;
+.spx-card{position:absolute;left:50%;bottom:12vh;transform:translateX(-50%);width:min(580px,92%);padding:16px 20px 13px;
   border-radius:12px;background:rgba(8,11,20,.78);border:1px solid #2c3346;backdrop-filter:blur(4px);text-align:center;
   transition:opacity .4s ease}
+.spx-warp[data-stage="4"]{opacity:0}
 .spx-warp[data-stage="4"] .spx-card{opacity:0}
 .spx-card h4{margin:0 0 4px;padding:0;font-size:1.02rem;color:#eef1f7}
 .spx-card p{margin:0;color:#a7afc0;font-size:.86rem}

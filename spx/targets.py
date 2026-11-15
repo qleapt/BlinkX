@@ -91,6 +91,26 @@ def parse_coords(text: str) -> Target | None:
     return None
 
 
+TELEPORT = "/rtp"
+
+
+def is_teleport(text: str) -> bool:
+    """'/RTP' (random teleport) in any case: jump to a random spot on the sky."""
+    return (text or "").strip().lower() == TELEPORT
+
+
+def random_position(rng=None) -> tuple[float, float]:
+    """A random sky position, evenly spread over the whole sphere (not crowded at the poles)."""
+    rng = rng or np.random.default_rng()
+    ra = float(rng.uniform(0.0, 360.0)) % 360.0
+    dec = float(np.degrees(np.arcsin(rng.uniform(-1.0, 1.0))))
+    return ra, dec
+
+
+def teleport_text(ra: float, dec: float) -> str:
+    return f"{ra:.5f} {dec:+.5f}"
+
+
 def looks_like_coords(text: str) -> bool:
     """True when the text is mostly numbers (the user meant a position, even if we could not read it)."""
     s = re.sub(r"(?i)(?<![a-z])(ra|dec)(?![a-z])", " ", text or "")

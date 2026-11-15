@@ -25,8 +25,8 @@ dates, and **Compare**: blink two dates, side by side with a linked crosshair, a
 Overlays: the predicted position of the target on each date (orange), Gaia DR3 stars moved to each date (blue,
 hover for brightness, motion and distance; off until you tick them) and flagged pixels (pink, e.g. saturation).
 
-**You find things; the tools measure them.** Nothing is pointed out by default. Mark what you see (it snaps to
-the star's centre): the viewer gives positions, distances, directions and speed between dates, a card with that
+**You find things; the tools measure them.** Nothing is pointed out by default. Mark what you see (the mark stays exactly
+where you click, even on dark sky; *Snap to star centre* is optional): the viewer gives positions, distances, directions and speed between dates, a card with that
 spot on every date and its brightness, and real sizes from a distance. **Check my find** analyses *all* the marks
 of one object together (`spx/motion.py`): each is measured on its own photo, one path is fitted through all of them,
 every pair is compared and every mark is tested against the others (leave-one-out), Gaia is checked at each mark's
@@ -137,7 +137,8 @@ spx/render.py       stretches, charts (spectrum, light curve, motion, miss dista
 spx/viewer/         the sky viewer: pixel values packed into PNGs, two-way component (frontend/index.html)
 spx/detect.py       optional helpers: star detection, what changed between two dates
 spx/motion.py       motion engine: joint fit of N positions, model choice, leave-one-out, classification, prediction
-spx/warp.py         loading screen (canvas star field)
+spx/warp.py         full-window loading screen (canvas star field)
+spx/eta.py          time-left estimate while loading, learned on this computer
 tests/              pytest on synthetic data
 ```
 

@@ -47,6 +47,14 @@ def encode_frames(images, flag_masks=None) -> dict:
     return dict(frames=out, lo=lo, s=s, a=a)
 
 
+def photo_uid(f) -> str:
+    """One id per photo, so marks on two single exposures taken minutes apart are never mixed up."""
+    stamps = getattr(f, "stamps", None) or []
+    if getattr(f, "kind", "") == "single" and stamps and getattr(stamps[0], "uri", ""):
+        return "exp:" + stamps[0].uri
+    return f"{getattr(f, 'kind', '')}:{f.label.split(' · ')[0]}:{float(f.mjd_mid):.6f}"
+
+
 def payload(frames, target=None, gaia=None, scale: float = 3.075, center=(0.0, 0.0), radec=(0.0, 0.0),
             diverging: bool = False, title: str = "", mode: str = "blink", stars=None, changes=None) -> dict:
     """frames: stack.Frame list. target / gaia / stars: one entry per frame (dict x, y, label / list of
@@ -56,7 +64,7 @@ def payload(frames, target=None, gaia=None, scale: float = 3.075, center=(0.0, 0
     ny, nx = frames[0].image.shape
     out = []
     for i, f in enumerate(frames):
-        out.append(dict(png=enc["frames"][i], label=f.label, mjd=float(f.mjd_mid),
+        out.append(dict(png=enc["frames"][i], label=f.label, mjd=float(f.mjd_mid), uid=photo_uid(f),
                         date=targets.mjd_to_date(f.mjd_mid), kind=getattr(f, "kind", ""),
                         flags=list(getattr(f, "flags", []) or []),
                         target=target[i] if target else None, gaia=gaia[i] if gaia else [],

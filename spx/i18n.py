@@ -43,10 +43,12 @@ TR: dict[str, str] = {
     "Object name or sky position (RA Dec in degrees)": "Cisim adı veya gökyüzü konumu (derece cinsinden RA Dec)",
     "Type the name of a star, galaxy or nebula (looked up in the SIMBAD catalogue), or a sky position as two "
     "numbers in degrees: RA (0–360) then Dec (−90 to +90), for example `269.452 4.693` or `269.452°, +4.693°`. "
-    "Hours-minutes-seconds also work: `17 57 48.5 +04 41 36`. Press Enter or Go.":
+    "Hours-minutes-seconds also work: `17 57 48.5 +04 41 36`. Press Enter or Go. Type `/RTP` (random teleport) to jump "
+    "to a random spot on the sky.":
         "Bir yıldız, gökada veya bulutsu adı yazın (SIMBAD kataloğunda aranır) ya da derece cinsinden iki sayı "
         "olarak bir gökyüzü konumu: önce RA (0–360), sonra Dec (−90 ile +90 arası), örneğin `269.452 4.693` veya "
-        "`269.452°, +4.693°`. Saat-dakika-saniye de olur: `17 57 48.5 +04 41 36`. Enter'a veya Git'e basın.",
+        "`269.452°, +4.693°`. Saat-dakika-saniye de olur: `17 57 48.5 +04 41 36`. Enter'a veya Git'e basın. "
+        "Gökyüzünde rastgele bir noktaya gitmek için `/RTP` (rastgele ışınlanma) yazın.",
     "Go": "Git", "Load this object or position": "Bu cismi veya konumu yükle",
     "A challenge target (built-in catalogue values)": "Örnek hedef (yerleşik katalog değerleri)",
     "Read as a sky position: RA {}°, Dec {}°": "Gökyüzü konumu olarak okundu: RA {}°, Dec {}°",
@@ -525,11 +527,17 @@ TR.update({
     "astronomy terms.":
         "Kısa açıklamalar için küçük soru işaretlerinin üzerine gelin; kenar çubuğundaki *Burada kullanılan sözcükler* "
         "astronomi terimlerini açıklar.",
-    "What the bands mean (infrared colours and their energy)": "Bantlar ne anlama gelir (kızılötesi renkler ve enerjileri)",
-    "Brightness scales: linear, sqrt, log, asinh (what they do, where to use them)":
-        "Parlaklık ölçekleri: linear, sqrt, log, asinh (ne yaparlar, nerede kullanılırlar)",
-    "Pixel brightness (0 = Dark level, 1 = Bright level)": "Piksel parlaklığı (0 = Koyu düzeyi, 1 = Parlak düzeyi)",
-    "Grey on screen (0 = black, 1 = white)": "Ekrandaki gri (0 = siyah, 1 = beyaz)",
+    "about {} s left": "yaklaşık {} sn kaldı", "about {} min left": "yaklaşık {} dk kaldı",
+    "almost done": "neredeyse bitti", "{} of {} photos": "{} / {} fotoğraf",
+    "taking longer than usual": "her zamankinden uzun sürüyor",
+    "under {}″/h": "{}″/sa altında", "under {}″/min": "{}″/dk altında",
+    "No motion between the positions ({} apart): they agree within the measuring error (any motion is below {} at "
+    "3σ). Over so short a time only an asteroid, a satellite or a meteor could move visibly; every star stands still.":
+        "Konumlar arasında hareket yok ({} arayla): ölçüm hatası içinde uyuşuyorlar (herhangi bir hareket 3σ "
+        "düzeyinde {}'den az). Bu kadar kısa sürede yalnızca bir asteroit, bir uydu veya bir meteor görünür biçimde "
+        "hareket edebilir; her yıldız yerinde durur.",
+    "Random teleport (/RTP): RA {}°, Dec {}°. Type /RTP again for another spot.":
+        "Rastgele ışınlanma (/RTP): RA {}°, Dec {}°. Başka bir nokta için yeniden /RTP yazın.",
     # Check my find
     "Mark the same object on two or more photos (different dates) to measure how it moves. Every mark is compared "
     "with every other one, and the path is predicted into the future.":
@@ -769,6 +777,8 @@ TR.update({
     "{} gives it almost no motion ({}″ per year).": "{} ona neredeyse hiç hareket vermiyor (yılda {}″).",
     "The catalogue": "Katalog",
     "{} hours": "{} saat", "{} days": "{} gün", "{} years": "{} yıl",
+    "{} minutes": "{} dakika", "{}″ per minute": "dakikada {}″", "{}″/min": "{}″/dk",
+    "Predict ahead (minutes)": "İleriye tahmin (dakika)", "predicted position each step": "her adımda tahmini konum",
     "{}″ per hour": "saatte {}″", "{}″ per year": "yılda {}″",
     "On the photo of mark {}, something {}% as bright still sits where mark {} was: the marks may be on two different "
     "objects.":

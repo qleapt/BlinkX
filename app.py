@@ -12,7 +12,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from astropy.time import Time
 
-from spx import archive, catalogs, config, cutouts, detect, i18n, motion, photometry, render, stack, targets, viewer, warp
+from spx import archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, render, stack, targets, viewer, warp
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
 # English / Turkish: everything Streamlit shows goes through i18n.tr() when Turkish is chosen
@@ -40,7 +40,7 @@ HOW_TO = {
         "same object again. Three or more dates are best. *Check my find* under the viewer then fits one path "
         "through all your marks, says what kind of object it probably is, and predicts where it goes.\n"
         "5. **Dark, Bright and the scale** (asinh, log, sqrt, linear) only change how the picture looks, never the "
-        "measurements: see *Brightness scales* below.\n\n"
+        "measurements: the ? next to the scale in the viewer explains each one.\n\n"
         "Tip: switch on *Include older photos* in the sidebar to add 2MASS (~2000) and WISE (2010): 15–25 years "
         "make even slow stars jump."),
     "sub": (
@@ -102,35 +102,19 @@ HOW_TO = {
         "Optional: *Also measure it on the other photos* adds positions where your marks predict the object "
         "(off by default)."),
 }
-BANDS_TEXT = (
-    "SPHEREx sees infrared light, invisible to our eyes, in six bands. Shorter wavelength means more energetic "
-    "light: the energy of one photon is E = 1.24 / λ electronvolts (eV) with λ in µm. Visible light is 1.8–3.1 eV.\n\n"
-    "| Band | Wavelength | Energy per photon | What stands out |\n|---|---|---|---|\n"
-    "| **D1** | 0.75–1.09 µm | 1.65–1.14 eV | Just beyond red light. Ordinary (Sun-like) and hot stars are brightest here. |\n"
-    "| **D2** | 1.10–1.62 µm | 1.13–0.77 eV | Cool red stars peak near here; brown dwarfs show water dips (1.4 µm). |\n"
-    "| **D3** | 1.63–2.41 µm | 0.76–0.51 eV | Sees through dust better: red giants, young stars hidden in dusty clouds. |\n"
-    "| **D4** | 2.42–3.82 µm | 0.51–0.32 eV | Water ice (3.0 µm), glowing dust (3.3 µm); methane makes cold brown dwarfs faint here. |\n"
-    "| **D5** | 3.83–4.41 µm | 0.32–0.28 eV | CO₂ ice (4.27 µm); cold brown dwarfs are bright from 4 to 5 µm. |\n"
-    "| **D6** | 4.42–5.00 µm | 0.28–0.25 eV | CO ice (4.67 µm); the coldest brown dwarfs (WISE 0855) are brightest here; warm dust. |\n\n"
-    "The brightness numbers say how much of that light arrives, not how energetic each photon is: **MJy/sr** "
-    "(megajansky per steradian) for a patch of sky in the pictures, **mJy** (millijansky) for one star in the "
-    "Spectrum view. 1 jansky = 10⁻²⁶ watt per square metre per hertz. Older surveys: 2MASS J ≈ D1/D2, Ks ≈ D3; "
-    "WISE W1 ≈ D4, W2 ≈ D5/D6.")
-SCALES_TEXT = (
-    "A photo's pixels range from the dark sky to stars thousands of times brighter, but a screen has only 256 "
-    "shades of grey. The **brightness scale** (stretch) decides which brightness gets which grey. It changes only "
-    "how the picture looks: positions, brightness readings and measurements stay the same.\n\n"
-    "**Where:** the drop-down next to *Dark* and *Bright* in the viewer's toolbar (Blink, Subtract, Every "
-    "exposure, and the viewers inside Motion check). *Dark* is the level shown as black and *Bright* the level "
-    "shown as white (as percentiles of all pixels); the scale shapes everything in between. The GIF download uses "
-    "asinh. The Spectrum view's *Logarithmic flux axis* is the same log idea applied to a chart axis.\n\n"
-    "| Scale | What it does | Use it for |\n|---|---|---|\n"
-    "| **linear** | Grey goes up in step with brightness. | Judging brightness honestly and bright things; faint ones disappear. |\n"
-    "| **sqrt** (square root) | Lifts the faint part a little. | Moderate ranges: galaxy and nebula detail without burning out stars. |\n"
-    "| **log** (logarithm) | Lifts the faint part strongly, squeezes the bright part. | Faint nebulosity next to bright stars; also lifts the noise. |\n"
-    "| **asinh** (default) | Linear for the faintest pixels, logarithmic for bright ones. | Everyday use: faint and bright stars both visible, noise stays calm. |\n\n"
-    "In *Subtract*, red and blue use asinh as well (or linear when chosen), so small changes stay visible next "
-    "to big ones. The chart shows the four curves: pixel brightness across, grey on screen up.")
+BAND_HELP = (
+    "SPHEREx sees infrared light, invisible to our eyes, in six bands. Shorter wavelength = more energetic light: "
+    "one photon carries E = 1.24 / λ electronvolts (λ in µm); visible light is 1.8–3.1 eV.\n\n"
+    "- **D1** 0.75–1.09 µm (1.65–1.14 eV): just beyond red light; ordinary and hot stars are brightest here.\n"
+    "- **D2** 1.10–1.62 µm (1.13–0.77 eV): cool red stars peak here; brown dwarfs show water dips (1.4 µm).\n"
+    "- **D3** 1.63–2.41 µm (0.76–0.51 eV): sees through dust; red giants, young stars hidden in dusty clouds.\n"
+    "- **D4** 2.42–3.82 µm (0.51–0.32 eV): water ice (3.0 µm), glowing dust (3.3 µm); methane makes cold brown "
+    "dwarfs faint here.\n"
+    "- **D5** 3.83–4.41 µm (0.32–0.28 eV): CO₂ ice (4.27 µm); cold brown dwarfs are bright from 4 to 5 µm.\n"
+    "- **D6** 4.42–5.00 µm (0.28–0.25 eV): CO ice (4.67 µm); the coldest brown dwarfs (WISE 0855) are brightest "
+    "here; warm dust.\n\n"
+    "Brightness numbers say how much of that light arrives: MJy/sr for a patch of sky, mJy for one star. "
+    "µm = micrometre.")
 HOW_TO_TR = {
     "blink": (
         "1. Kenar çubuğundan **bir hedef seçin**: örnek bir hedef, herhangi bir ad (örn. *M 42*) ya da derece cinsinden "
@@ -146,7 +130,7 @@ HOW_TO_TR = {
         "altındaki *Bulduğumu denetle* tüm işaretlerinizden tek bir yol geçirir, muhtemelen ne tür bir cisim olduğunu "
         "söyler ve nereye gideceğini tahmin eder.\n"
         "5. **Koyu, Parlak ve ölçek** (asinh, log, sqrt, linear) yalnızca resmin görünüşünü değiştirir, ölçümleri asla: "
-        "aşağıdaki *Parlaklık ölçekleri*'ne bakın.\n\n"
+        "görüntüleyicide ölçeğin yanındaki ? her birini açıklar.\n\n"
         "İpucu: 2MASS (~2000) ve WISE (2010) fotoğraflarını eklemek için kenar çubuğunda *Eski fotoğrafları ekle*'yi "
         "açın: 15–25 yıl, yavaş yıldızları bile sıçratır."),
     "sub": (
@@ -212,37 +196,23 @@ HOW_TO_TR = {
         "İsteğe bağlı: *Diğer fotoğraflarda da ölç*, işaretlerinizin cismi öngördüğü yerlerdeki konumları ekler "
         "(varsayılan olarak kapalı)."),
 }
-BANDS_TEXT_TR = (
-    "SPHEREx gözlerimizin göremediği kızılötesi ışığı altı bantta görür. Daha kısa dalga boyu daha enerjik ışık "
-    "demektir: bir fotonun enerjisi E = 1,24 / λ elektronvolttur (eV), λ µm cinsinden. Görünür ışık 1,8–3,1 eV'dir.\n\n"
-    "| Bant | Dalga boyu | Foton başına enerji | Öne çıkan |\n|---|---|---|---|\n"
-    "| **D1** | 0,75–1,09 µm | 1,65–1,14 eV | Kırmızının hemen ötesi. Sıradan (Güneş benzeri) ve sıcak yıldızlar burada en parlaktır. |\n"
-    "| **D2** | 1,10–1,62 µm | 1,13–0,77 eV | Soğuk kırmızı yıldızlar buraya yakın tepe yapar; kahverengi cücelerde su çukurları (1,4 µm). |\n"
-    "| **D3** | 1,63–2,41 µm | 0,76–0,51 eV | Tozun içini daha iyi görür: kırmızı devler, tozlu bulutlarda saklı genç yıldızlar. |\n"
-    "| **D4** | 2,42–3,82 µm | 0,51–0,32 eV | Su buzu (3,0 µm), parlayan toz (3,3 µm); metan soğuk kahverengi cüceleri burada sönük yapar. |\n"
-    "| **D5** | 3,83–4,41 µm | 0,32–0,28 eV | CO₂ buzu (4,27 µm); soğuk kahverengi cüceler 4–5 µm arasında parlaktır. |\n"
-    "| **D6** | 4,42–5,00 µm | 0,28–0,25 eV | CO buzu (4,67 µm); en soğuk kahverengi cüceler (WISE 0855) burada en parlaktır; ılık toz. |\n\n"
-    "Parlaklık sayıları o ışıktan ne kadar geldiğini söyler, her fotonun ne kadar enerjik olduğunu değil: "
-    "resimlerdeki bir gökyüzü parçası için **MJy/sr** (steradyan başına megajansky), Tayf görünümündeki tek bir "
-    "yıldız için **mJy** (millijansky). 1 jansky = metrekare başına, hertz başına 10⁻²⁶ watt. Eski taramalar: 2MASS "
-    "J ≈ D1/D2, Ks ≈ D3; WISE W1 ≈ D4, W2 ≈ D5/D6.")
-SCALES_TEXT_TR = (
-    "Bir fotoğrafın pikselleri karanlık gökyüzünden binlerce kat daha parlak yıldızlara kadar uzanır, ama ekranın "
-    "yalnızca 256 gri tonu vardır. **Parlaklık ölçeği** (germe) hangi parlaklığın hangi griyi alacağına karar verir. "
-    "Yalnızca resmin görünüşünü değiştirir: konumlar, parlaklık okumaları ve ölçümler aynı kalır.\n\n"
-    "**Nerede:** görüntüleyicinin araç çubuğunda *Koyu* ve *Parlak*'ın yanındaki açılır liste (Blink, Çıkar, Her poz "
-    "ve Hareket kontrolü içindeki görüntüleyiciler). *Koyu* siyah gösterilen düzey, *Parlak* beyaz gösterilen "
-    "düzeydir (tüm piksellerin yüzdelikleri olarak); ölçek aradaki her şeyi biçimlendirir. GIF indirme asinh "
-    "kullanır. Tayf görünümündeki *Logaritmik akı ekseni* aynı log fikrinin bir grafik eksenine uygulanmasıdır.\n\n"
-    "| Ölçek | Ne yapar | Ne için kullanılır |\n|---|---|---|\n"
-    "| **linear** (doğrusal) | Gri, parlaklıkla aynı adımda artar. | Parlaklığı dürüstçe değerlendirmek ve parlak cisimler; sönükler kaybolur. |\n"
-    "| **sqrt** (karekök) | Sönük kısmı biraz kaldırır. | Orta aralıklar: yıldızları yakmadan gökada ve bulutsu ayrıntısı. |\n"
-    "| **log** (logaritma) | Sönük kısmı güçlüce kaldırır, parlak kısmı sıkıştırır. | Parlak yıldızların yanındaki sönük bulutsular; gürültüyü de kaldırır. |\n"
-    "| **asinh** (varsayılan) | En sönük pikseller için doğrusal, parlaklar için logaritmik. | Günlük kullanım: sönük ve parlak yıldızlar birlikte görünür, gürültü sakin kalır. |\n\n"
-    "*Çıkar*'da kırmızı ve mavi de asinh kullanır (ya da seçildiğinde linear), böylece küçük değişimler büyüklerin "
-    "yanında görünür kalır. Grafik dört eğriyi gösterir: yatayda piksel parlaklığı, dikeyde ekrandaki gri.")
+BAND_HELP_TR = (
+    "SPHEREx gözlerimizin göremediği kızılötesi ışığı altı bantta görür. Daha kısa dalga boyu = daha enerjik ışık: "
+    "bir foton E = 1,24 / λ elektronvolt taşır (λ µm cinsinden); görünür ışık 1,8–3,1 eV'dir.\n\n"
+    "- **D1** 0,75–1,09 µm (1,65–1,14 eV): kırmızının hemen ötesi; sıradan ve sıcak yıldızlar burada en parlaktır.\n"
+    "- **D2** 1,10–1,62 µm (1,13–0,77 eV): soğuk kırmızı yıldızlar burada tepe yapar; kahverengi cücelerde su "
+    "çukurları (1,4 µm).\n"
+    "- **D3** 1,63–2,41 µm (0,76–0,51 eV): tozun içini görür; kırmızı devler, tozlu bulutlarda saklı genç "
+    "yıldızlar.\n"
+    "- **D4** 2,42–3,82 µm (0,51–0,32 eV): su buzu (3,0 µm), parlayan toz (3,3 µm); metan soğuk kahverengi cüceleri "
+    "burada sönük yapar.\n"
+    "- **D5** 3,83–4,41 µm (0,32–0,28 eV): CO₂ buzu (4,27 µm); soğuk kahverengi cüceler 4–5 µm arasında parlaktır.\n"
+    "- **D6** 4,42–5,00 µm (0,28–0,25 eV): CO buzu (4,67 µm); en soğuk kahverengi cüceler (WISE 0855) burada en "
+    "parlaktır; ılık toz.\n\n"
+    "Parlaklık sayıları o ışıktan ne kadar geldiğini söyler: gökyüzü parçası için MJy/sr, tek yıldız için mJy. "
+    "µm = mikrometre.")
 i18n.TR.update({HOW_TO[k]: HOW_TO_TR[k] for k in HOW_TO})
-i18n.TR.update({BANDS_TEXT: BANDS_TEXT_TR, SCALES_TEXT: SCALES_TEXT_TR})
+i18n.TR.update({BAND_HELP: BAND_HELP_TR})
 PRESET_HELP = {"Barnard's Star": "Fastest-moving star in the sky (10″ a year)",
                "Epsilon Indi B": "Pair of cold brown dwarfs, 12 light-years away",
                "WISE 0855-0714": "Coldest known brown dwarf (about as cold as a freezer); fast mover",
@@ -287,13 +257,19 @@ def _pick(name):
 
 
 _init()
+if targets.is_teleport(ss.get("target_text", "")):   # /RTP: a random spot on the sky, written back as RA Dec
+    ss.target_text = targets.teleport_text(*targets.random_position())
+    ss["_rtp"] = ss.target_text
 
 def _input_hint(text):
     """One line under the search box saying how the text will be read."""
     if targets.preset(text):
         st.caption("A challenge target (built-in catalogue values)")
     elif (t := targets.parse_coords(text)) is not None:
-        st.caption(f"Read as a sky position: RA {t.ra:.5f}°, Dec {t.dec:+.5f}°")
+        if ss.get("_rtp") == text:
+            st.caption(f"Random teleport (/RTP): RA {t.ra:.5f}°, Dec {t.dec:+.5f}°. Type /RTP again for another spot.")
+        else:
+            st.caption(f"Read as a sky position: RA {t.ra:.5f}°, Dec {t.dec:+.5f}°")
     elif targets.looks_like_coords(text):
         st.caption("Warning: this looks like numbers but is not a valid position. Use two numbers in degrees: "
                    "RA from 0 to 360, then Dec from −90 to +90, e.g. `269.452 4.693`.")
@@ -327,11 +303,12 @@ with st.sidebar:
     st.header("SPHEREx Blink")
     st.markdown("**① What to look at**")
     st.text_input("Object name or sky position (RA Dec in degrees)", key="target_text",
-                  placeholder="Barnard's Star  ·  M 42  ·  269.452 4.693",
+                  placeholder="Barnard's Star  ·  M 42  ·  269.452 4.693  ·  /RTP",
                   help="Type the name of a star, galaxy or nebula (looked up in the SIMBAD catalogue), or a "
                        "sky position as two numbers in degrees: RA (0–360) then Dec (−90 to +90), for "
                        "example `269.452 4.693` or `269.452°, +4.693°`. Hours-minutes-seconds also work: "
-                       "`17 57 48.5 +04 41 36`. Press Enter or Go.")
+                       "`17 57 48.5 +04 41 36`. Press Enter or Go. Type `/RTP` (random teleport) to jump to a "
+                       "random spot on the sky.")
     st.button("Go", type="primary", use_container_width=True, help="Load this object or position")
     _input_hint(ss.target_text)
     st.caption("…or pick a challenge target:")
@@ -341,9 +318,7 @@ with st.sidebar:
                            help=PRESET_HELP.get(name))
     st.markdown("**② Colour and size**")
     st.selectbox("Band (which infrared colour)", list(config.BANDS), key="band", format_func=BAND_LABEL.get,
-                 help="SPHEREx splits infrared light into six bands: D1 has the shortest wavelengths "
-                      "(just beyond red light), D6 the longest (sees cool dust and cold brown dwarfs). "
-                      "µm = micrometre.")
+                 help=BAND_HELP)
     st.radio("Field of view (how much sky)", config.FOV_CHOICES, key="fov", horizontal=True,
              format_func=lambda f: f"{f}′",
              help="Width of the picture in arcminutes (′). 60′ = 1°; the full Moon is about 30′ wide. "
@@ -435,11 +410,6 @@ with st.expander(f"How to use {MODE_LABEL[ss.mode]} (30 seconds)"):
     st.markdown(HOW_TO[ss.mode])
     st.caption("Hover over the small question-mark icons for short explanations; *Words used here* in the sidebar "
                "explains the astronomy terms.")
-with st.expander("What the bands mean (infrared colours and their energy)"):
-    st.markdown(BANDS_TEXT)
-with st.expander("Brightness scales: linear, sqrt, log, asinh (what they do, where to use them)"):
-    st.markdown(SCALES_TEXT)
-    st.plotly_chart(render.stretch_fig(), use_container_width=True)
 load = Loader()
 load.step("Finding your target…", "Reading the position you typed, or looking the name up in the SIMBAD catalogue", 0)
 try:
@@ -468,11 +438,22 @@ fut_survey = (_bg.submit(catalogs.survey_frames, round(ra0, 5), round(dec0, 5), 
               if ss.survey and ss.mode in ("blink", "sub", "motion") else None)
 _bg.shutdown(wait=False)
 
-def waiting(t0, what=""):
-    """Plain words for the loading card: how long we have waited, and why when it is long."""
+def waiting(t0, what="", step=None, estimate=None):
+    """Plain words for the loading card: how long we have waited, how long is probably left, and why when it is
+    long. estimate: words for the time left (downloads); step: a step whose usual length was learned (search)."""
     el = time.time() - t0
-    return (what + f"{el:.0f} s" + (" · NASA's servers or the connection are slow right now: it keeps trying, and "
-                                    "whatever arrives is saved, so the next visit is fast" if el > 12 else ""))
+    left = eta.Estimator().step_left(step, el) if step else None
+    if estimate:
+        extra = f" · {estimate}" + (" · NASA's servers or the connection are slow right now: it keeps trying, and "
+                                    "whatever arrives is saved, so the next visit is fast" if el > 12 else "")
+    elif step and left is not None:
+        extra = f" · {eta.words(left)}"
+    elif el > 12:
+        extra = (" · NASA's servers or the connection are slow right now: it keeps trying, and whatever arrives is "
+                 "saved, so the next visit is fast")
+    else:
+        extra = " · taking longer than usual" if step else ""
+    return what + f"{el:.0f} s" + extra
 
 
 load.step("Asking NASA's archive which photos cover this spot…",
@@ -484,9 +465,11 @@ try:
     while True:  # keep the loading card alive while the archive answers
         try:
             exps = _fs.result(timeout=0.5)
+            if time.time() - _t_search > 0.3:   # an answer from the archive, not from this computer's memory
+                eta.Estimator().learn_step("search", time.time() - _t_search)   # better estimates next time
             break
         except FutureTimeout:
-            load.note(waiting(_t_search))
+            load.note(waiting(_t_search, step="search"))
 except archive.ArchiveBusy:
     load.done(arrive=False)
     st.warning("The NASA/IPAC archive is busy right now. Please try again in a minute.")
@@ -508,9 +491,17 @@ def fetch(todo, label, group_of=None):
 
         def enough(got):
             return need <= {group_of.get(x.uri) for x in got}
+    n_cached = sum(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in todo)
+    est = eta.Estimator()
+    first = est.start(len(todo) - n_cached, n_cached) + eta.ALIGN_SECONDS * len(todo)
+    load.progress(0.0, f"0 of {len(todo)} photos · {eta.words(first)}")
     t_fetch = time.time()
-    out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45,
-                                    lambda d, n: load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · ")),
+
+    def progress(d, n):
+        left = est.update(d, n, time.time() - t_fetch)
+        left = None if left is None else left + eta.ALIGN_SECONDS * n
+        load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · ", estimate=eta.words(left)))
+    out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45, progress,
                                     deadline=config.FETCH_SOFT_DEADLINE if group_of else None,
                                     enough=enough, stats=stats)
     if not out:
@@ -519,6 +510,7 @@ def fetch(todo, label, group_of=None):
                    "Please try again in a minute.")
         st.stop()
     ss["_skipped"] = stats.get("skipped", 0)
+    est.learn(max(0, len(out) - n_cached), time.time() - t_fetch)   # better estimates next time
     load.progress(1.0, f"{len(out)} photos" + (f" ({nfail} failed)" if nfail else ""))
     load.step("Lining the photos up…", "Turning every photo north-up on one grid and averaging each epoch", 3)
     return out
@@ -856,7 +848,7 @@ def check_my_find(marks, key):
                                    "of other objects. Three or more marks let the app check that they lie on one "
                                    "path and spot a mark that does not belong.")
         sel = [dict(marks[i], label=f"#{i + 1}") for i in sorted(pick)]
-        n_photos = len({round(m["mjd"], 2) for m in sel})
+        n_photos = len({m.get("uid") or round(m["mjd"] * 86400) for m in sel})   # exposures can be minutes apart
         b1, b2 = st.columns(2)
         b1.button(f"Analyse the motion of these {len(sel)} marks", type="primary", on_click=_go_track, args=(sel,),
                   key=f"find_go|{key}", use_container_width=True, disabled=n_photos < 2,
@@ -1001,19 +993,31 @@ def motion_check(t, note=""):
         sky_viewer(frames, key_extra=f"motion|{t.name}", follow=t)
 
 
-def photo_of(mjd):
-    """The photo a mark was made on (epoch stack, older survey, or a single exposure), by its date."""
-    for f in frames:
-        if abs(f.mjd_mid - mjd) < 0.01:
-            return f
-    for i, a in enumerate(by_uri.values()):
-        if abs(0.5 * (a.stamp.mjd + a.stamp.mjd_end) - mjd) < 0.01:
-            return stack.single_frame(a, i + 1)
-    return None
+def photo_of(m):
+    """The photo a mark was made on (epoch stack, older survey or single exposure): by the photo's id, so two
+    single exposures taken minutes apart stay two photos; marks saved before ids existed are found by date."""
+    uid = m.get("uid") or ""
+    if uid:
+        for f in frames:
+            if viewer.photo_uid(f) == uid:
+                return f
+        if uid.startswith("exp:") and uid[4:] in by_uri:
+            return stack.single_frame(by_uri[uid[4:]], list(by_uri).index(uid[4:]) + 1)
+    cands = [(abs(f.mjd_mid - m["mjd"]), k, f) for k, f in enumerate(frames)]
+    cands += [(abs(0.5 * (a.stamp.mjd + a.stamp.mjd_end) - m["mjd"]), len(frames) + i, a)
+              for i, a in enumerate(by_uri.values())]
+    d, k, best = min(cands, key=lambda c: c[:2]) if cands else (1.0, 0, None)
+    if best is None or d > 1e-4:   # 9 seconds: closer than any two exposures
+        return None
+    return best if k < len(frames) else stack.single_frame(best, k - len(frames) + 1)
 
 
 def where_on(f, m):
-    """Centre of the marked object on its own photo (light-weighted), and its uncertainty in arcsec."""
+    """Where the mark is on its own photo, and its uncertainty in arcsec. A mark stays exactly where it was
+    clicked (even on dark sky); only when 'Snap to star centre' was on is it re-centred on the light."""
+    if not m.get("snap"):
+        r, d = wgrid.pixel_to_world_values(float(m["x"]), float(m["y"]))
+        return float(r), float(d), float(arcsec_px), (float(m["x"]), float(m["y"]))   # a click: about one display pixel
     cx, cy = photometry.centroid(f.image, float(m["x"]), float(m["y"]), r=3)
     if not np.isfinite(cx) or np.hypot(cx - m["x"], cy - m["y"]) > 3:
         cx, cy = float(m["x"]), float(m["y"])
@@ -1088,10 +1092,13 @@ def verdict_block(fit, cls):
     c1, c2, c3, c4 = st.columns(4)
     hours = fit.span_days < 5
     if fit.model == "static":
-        c1.metric("Speed", f"under {fit.mu_limit:.1f}″/yr", help="No motion was found; it is slower than this (3σ).")
+        lim = (f"under {fit.mu_limit / motion.YEAR / 1440:.2f}″/min" if fit.span_days < 1 / 24 else
+               f"under {fit.mu_limit / motion.YEAR / 24:.2f}″/h" if hours else f"under {fit.mu_limit:.1f}″/yr")
+        c1.metric("Speed", lim, help="No motion was found; it is slower than this (3σ).")
         c2.metric("Direction", "–")
     else:
-        sp = (_pm(fit.mu / motion.YEAR / 24, fit.mu_err / motion.YEAR / 24, "″/h") if hours else
+        sp = (_pm(fit.mu / motion.YEAR / 1440, fit.mu_err / motion.YEAR / 1440, "″/min") if fit.span_days < 1 / 24
+              else _pm(fit.mu / motion.YEAR / 24, fit.mu_err / motion.YEAR / 24, "″/h") if hours else
               _pm(fit.mu, fit.mu_err, "″/yr"))
         c1.metric("Speed", sp, help="How fast it moves across the sky, from one path fitted through all the marks "
                                     "at once (not from two marks only). ± is the uncertainty (1σ).")
@@ -1122,7 +1129,14 @@ def future_section(fit, cls, obs, key, cat_target=None):
     if cls.best == "mismatch":
         st.warning("The marks probably do not belong to one object, so the prediction below is not reliable. "
                    "Leave out the mark that does not fit (see *Every mark against the others* below) and try again.")
-    if short:
+    if short and fit.span_days < 1 / 24:   # single exposures minutes apart: think in minutes
+        ahead = st.slider("Predict ahead (minutes)", 1, 180, 30, key=f"ahead_m|{key}",
+                          help="How far past the last mark to continue the path.")
+        end = last + ahead / 1440
+        step = max(1, ahead // 8)
+        tick_mjd = [last + k / 1440 for k in range(step, ahead + 1, step)]
+        tick_txt = [f"+{k} min" for k in range(step, ahead + 1, step)]
+    elif short:
         ahead = st.slider("Predict ahead (hours)", 1, 72, 24, key=f"ahead_h|{key}",
                           help="How far past the last mark to continue the path.")
         end = last + ahead / 24
@@ -1155,7 +1169,7 @@ def future_section(fit, cls, obs, key, cat_target=None):
         ce, cn = catalogue_offsets(cat_target, fit, np.concatenate([path_mjd, fut_mjd]))
         cat = dict(e=ce, n=cn)
     st.plotly_chart(render.future_fig(marks, dict(e=pe, n=pn), dict(e=fe, n=fn, se=fse, sn=fsn, ticks=ticks), cat,
-                                      "hour step" if short else "year"), use_container_width=True)
+                                      "step" if short else "year"), use_container_width=True)
     T = lambda x: i18n.tr(x, ss.lang)  # noqa: E731
     st.caption(T("**Reading the plot:** coloured points are the marks (east to the left, as on the sky), with their "
                  "measuring error. The solid line is the one path fitted through all of them; the dashed line "
@@ -1206,10 +1220,12 @@ def details_block(fit, obs):
                                  p["dn"] - (pred[p["j"]][1] - pred[p["i"]][1])))
             days = p["days"]
             rows.append({"Pair": f"{a.label} → {b.label}",
-                         "Time apart": f"{days * 24:.1f} h" if days < 2 else f"{days:.0f} days",
+                         "Time apart": (f"{days * 1440:.1f} min" if days < 1 / 24 else f"{days * 24:.1f} h" if days < 2
+                                        else f"{days:.0f} days"),
                          "Moved (″)": round(p["dist"], 2), "± (″)": round(p["err"], 2),
                          "Direction": f"{p['way']} ({p['pa']:.0f}°)",
-                         "Speed": ((f"{p['speed_hr']:.2f}″/h" if days < 5 else f"{p['speed_yr']:.2f}″/yr")
+                         "Speed": ((f"{p['speed_hr'] / 60:.2f}″/min" if days < 1 / 24 else
+                                    f"{p['speed_hr']:.2f}″/h" if days < 5 else f"{p['speed_yr']:.2f}″/yr")
                                    if days > 0 else "–"),
                          "Real move? (σ)": round(p["sig"], 1),
                          "Off the fitted path (″)": round(off, 2)})
@@ -1260,11 +1276,11 @@ def details_block(fit, obs):
             "the fit (the band widens with time).")
 
 
-def found_rows(fit0, used_mjd):
+def found_rows(fit0, used):
     """The object measured on the photos it was not marked on, at the spot the marks predict (on request)."""
     out = []
     for f in frames:
-        if any(abs(f.mjd_mid - m) < 0.01 for m in used_mjd):
+        if viewer.photo_uid(f) in used:
             continue
         pra, pdec, se, sn = fit0.predict([f.mjd_mid])
         gx, gy = (float(v) for v in wgrid.world_to_pixel_values(pra[0], pdec[0]))
@@ -1278,7 +1294,7 @@ def found_rows(fit0, used_mjd):
         nz = detect.noise(f.image)
         if not (np.isfinite(fl) and fl > 5 * detect.OVERSAMPLE_NOISE * np.sqrt(max(npx, 1)) * nz):
             continue
-        out.append(dict(m=dict(x=cx, y=cy, mjd=f.mjd_mid, label=""), f=f))
+        out.append(dict(m=dict(x=cx, y=cy, mjd=f.mjd_mid, label="", snap=True), f=f))
     return out
 
 
@@ -1288,7 +1304,7 @@ def track_check(marks):
     rows, missing = [], []
     for i, m in enumerate(sorted(marks, key=lambda m: m["mjd"])):
         m = dict(m, label=m.get("label") or f"#{i + 1}")
-        f = photo_of(m["mjd"])
+        f = photo_of(m)
         if f is None:
             missing.append(m["label"])
             continue
@@ -1296,7 +1312,7 @@ def track_check(marks):
     if missing:
         st.warning(f"Marks {', '.join(missing)} were made on photos that are not in this view (another band or "
                    "field?), so they are left out.")
-    if len({round(r["f"].mjd_mid, 2) for r in rows}) < 2:
+    if len({viewer.photo_uid(r["f"]) for r in rows}) < 2:
         st.warning("At least two of the marks must be on different photos of this view. Go back and mark the "
                    "object on two or more dates.")
         return
@@ -1324,7 +1340,7 @@ def track_check(marks):
     if rec:
         fit0 = motion.fit([r["obs"] for r in rows])
         if fit0.span_days >= 5:
-            extra = found_rows(fit0, [r["f"].mjd_mid for r in rows])
+            extra = found_rows(fit0, {viewer.photo_uid(r["f"]) for r in rows})
             for k, r in enumerate(sorted(extra, key=lambda r: r["f"].mjd_mid)):
                 r["m"].update(label=f"F{k + 1}", kind="found")
             rows = sorted(rows + measure(extra), key=lambda r: r["f"].mjd_mid)
@@ -1337,7 +1353,7 @@ def track_check(marks):
     lb = []
     for i, j in combinations(range(len(rows)), 2):
         a, b = rows[i], rows[j]
-        if a["f"] is b["f"] or np.hypot(a["cx"] - b["cx"], a["cy"] - b["cy"]) * arcsec_px < 6:
+        if viewer.photo_uid(a["f"]) == viewer.photo_uid(b["f"]) or np.hypot(a["cx"] - b["cx"], a["cy"] - b["cy"]) * arcsec_px < 6:
             continue
         fb, _ = detect.aperture(b["f"].image, b["cx"], b["cy"])
         fab, _ = detect.aperture(b["f"].image, a["cx"], a["cy"])
@@ -1349,7 +1365,7 @@ def track_check(marks):
     cls = motion.classify(obs, fit, gaia=gaia, left_behind=lb, confirmed=conf)
     days = fit.span_days
     st.caption(f"{len(obs)} positions on {fit.n_dates} photos, spanning "
-               + (f"{days * 24:.1f} hours" if days < 2 else f"{days:.0f} days" if days < 730 else
+               + (f"{days * 1440:.1f} minutes" if days < 1 / 24 else f"{days * 24:.1f} hours" if days < 2 else f"{days:.0f} days" if days < 730 else
                   f"{days / 365.25:.1f} years")
                + ". Every mark is measured only on the photo it was made on, then all are fitted together. "
                + i18n.tr(gaia_note, ss.lang))

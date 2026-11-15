@@ -44,7 +44,7 @@ Your browser opens at **http://localhost:8501**.
 
 | Control | What it does |
 |---|---|
-| **Object name or RA Dec** | Type a star name (`Vega`, `M42`, `Proxima Cen`) or a position in degrees (`269.452 4.693`). |
+| **Object name or RA Dec** | Type a star name (`Vega`, `M42`, `Proxima Cen`) or a position in degrees (`269.452 4.693`). Type `/RTP` (random teleport) to jump to a random spot on the sky. |
 | **Challenge targets** | Five ready-made examples, one click each. |
 | **Field of view** | How much sky you see: 3, 5, 10 or 15 *arcminutes*. Bigger shows more neighbours. |
 | **Band** | Which slice of infrared light, D1 (0.75 µm, near red) to D6 (5 µm, warm-object light). |
@@ -52,8 +52,11 @@ Your browser opens at **http://localhost:8501**.
 | **Older surveys** | Off at first. Adds 2MASS (~2000) and WISE (2010) pictures before the SPHEREx ones. |
 
 **Top of the page: the view buttons** Blink · Subtract · Every exposure · Spectrum · Motion check. Under them,
-*How to use* explains the view you are in, *What the bands mean* lists D1–D6 with their wavelength and photon
-energy, and *Brightness scales* shows what linear, sqrt, log and asinh do and when to use each.
+*How to use* explains the view you are in. The **?** next to *Band* in the sidebar lists D1–D6 with their wavelength,
+photon energy and what stands out in each.
+
+While a page loads, a star-field animation fills the window, with the current step and an estimate of the time
+left (learned on your computer, then corrected by the real download speed).
 
 **The sky viewer** (all picture views)
 
@@ -61,7 +64,8 @@ energy, and *Brightness scales* shows what linear, sqrt, log and asinh do and wh
 - The **orange ring**: where your target should be on that date, from its catalogue motion.
 - **Play**, **Prev / Next** and the **timeline** under the picture (real dates; long gaps are squeezed, marked ≈).
   **Speed** and **Cross-fade** set how it plays.
-- **Dark / Bright** and the stretch menu change brightness and contrast instantly. Scroll to zoom, drag to move,
+- **Dark / Bright** and the scale menu change brightness and contrast instantly; the **?** next to the menu explains
+  linear, sqrt, log and asinh with a small chart. Scroll to zoom, drag to move,
   **Fit** to see everything again.
 - **Compare:** *Blink A ↔ B* flips two dates you pick, *Side by side* shows them next to each other with a linked
   crosshair, *Swipe* puts a divider you drag across, *Difference* subtracts them (red = brighter now, blue = was
@@ -176,8 +180,10 @@ Ideas: the closest star (Proxima Centauri) moves almost 4″ per year. Bright ne
 A position you type (e.g. `201.365 -43.019`) has no catalogued star to follow, so there is no predicted
 path to check. The app does not point anything out: you look, then the tools measure. In the viewer:
 
-- **Mark:** click anything to drop a numbered marker. With **Snap to star centre** on, the
-  marker jumps to the middle of the nearest star. The panel lists each marker's RA and Dec.
+- **Mark:** click anything to drop a numbered marker, exactly where you click, even on dark sky. Tick **Snap to
+  star centre** (off at first) to move it to the middle of the nearest star instead. The panel lists each marker's
+  RA and Dec. Each mark remembers its own photo, so in *Every exposure* marks on two exposures taken minutes apart
+  stay two photos (fast movers: asteroids, satellites, meteors), and speeds are given per minute or per hour.
 - **Distances between marks:** the separation (″) and direction between consecutive markers. Mark the
   *same* star on two dates (switch photos with ) and it also shows the **speed in ″ per year**.
   Under ~3″ (half a pixel) is within the measuring error.

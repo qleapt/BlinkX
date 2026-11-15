@@ -38,6 +38,14 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
 .cards figure{margin:0;text-align:center;font-size:10.5px;color:var(--ink2);cursor:pointer;position:relative}
 .cards canvas{display:block;border-radius:4px;background:#000;image-rendering:pixelated;width:60px;height:60px}
 .cards .x{position:absolute;left:0;top:0;pointer-events:none;background:transparent}
+.qwrap{position:relative;display:inline-flex;align-items:center}
+.qm{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:3px;border-radius:50%;
+  border:1px solid #4a5163;color:var(--ink2);font-size:11.5px;font-weight:700;cursor:help;user-select:none}
+.qm:hover,.qm:focus-visible,.qwrap.open .qm{border-color:var(--blue);color:var(--blue);outline:none}
+.pop{display:none;position:absolute;top:26px;left:-120px;width:min(380px,92vw);z-index:6;background:#121725;border:1px solid #33405a;
+  border-radius:9px;padding:9px 11px;color:#d7dce7;font-size:12.5px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.qwrap.open .pop{display:block}
+.pop p{margin:0 0 6px}.pop ul{margin:0 0 6px;padding-left:16px}.pop li{margin:2px 0}.pop canvas{display:block;margin-top:4px}
 </style></head><body>
 <div class="bar" role="toolbar" aria-label="Viewer tools">
   <button id="tLook" title="Move the mouse to read positions; drag to move around a zoomed image (key V)">Look</button>
@@ -60,8 +68,9 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
   <input type="range" id="speed" min="150" max="2000" step="50" title="Milliseconds per photo while playing">
   <label class="ck" title="Blend smoothly from one photo to the next instead of a hard flip"><input type="checkbox" id="fade"> Cross-fade</label>
   <span class="sep"></span>
-  <select id="stretch" title="How faint things are brightened: asinh and log lift faint things without burning out bright stars; linear shows brightness as it is">
+  <select id="stretch" title="Brightness scale (see the ? next to it)">
     <option value="asinh">asinh</option><option value="log">log</option><option value="sqrt">sqrt</option><option value="linear">linear</option></select>
+  <span class="qwrap" id="qStretch"><span class="qm" tabindex="0" role="button" aria-label="What the brightness scales do">?</span><div class="pop" role="tooltip"></div></span>
   <span class="lab" title="Darkest level: raise it to hide noisy background">Dark</span><input type="range" id="blk" min="0" max="60" step="0.5" title="Dark level (percentile of all pixels shown as black)">
   <span class="lab" title="Brightest level: lower it to bring out faint things">Bright</span><input type="range" id="wht" min="90" max="100" step="0.05" title="Bright level (percentile of all pixels shown as white)">
   <button id="zreset" title="Show the whole image again (key 0)">Fit</button>
@@ -73,7 +82,7 @@ input[type=number]{width:80px;background:#0f131b;color:var(--ink);border:1px sol
   <label class="ck" title="Your markers and lines"><input type="checkbox" id="oMine" checked> My marks</label>
   <label class="ck" id="lStars" style="display:none" title="Green crosses: stars the star-detection helper found on this photo (Snap puts your mark on their centre)"><input type="checkbox" id="oStars" checked> Detected stars</label>
   <label class="ck" id="lChg" style="display:none" title="What the 'Find what changed' helper found: magenta arrow = moved, red ring = brightened, blue ring = faded. Hover one for details"><input type="checkbox" id="oChg" checked> Changes</label>
-  <label class="ck" title="Moves your click to the light-weighted centre of the nearest bright spot, so marks land on the middle of a star"><input type="checkbox" id="snap" checked> Snap to star centre</label>
+  <label class="ck" title="Off: the mark goes exactly where you click, even on dark sky. On: your click moves to the light-weighted centre of the nearest bright spot"><input type="checkbox" id="snap"> Snap to star centre</label>
 </div>
 <div class="wrap">
   <div class="stage" id="stage">
@@ -142,7 +151,10 @@ const TRL = {
     "Her işaret yalnızca işaretlendiği fotoğrafta. Artı işareti sizin işaretinizdir; sayı, gökyüzü çıkarılmış hâliyle oradaki parlaklıktır. O fotoğrafı göstermek için birine tıklayın.",
   "Loading…": "Yükleniyor…", "Loading the photos… {} of {}": "Fotoğraflar yükleniyor… {} / {}",
   "toward the {} ({}° from north)": "{} yönünde (kuzeyden {}°)", "{} years apart → moved": "{} yıl arayla → hareket:",
-  "{}″ per year": "yılda {}″", "— less than half a pixel, so probably no real motion": "— yarım pikselden az, bu yüzden muhtemelen gerçek hareket yok",
+  "{}″ per year": "yılda {}″", "{}″ per hour": "saatte {}″", "{}″ per minute": "dakikada {}″",
+  "{} hours apart → moved": "{} saat arayla → hareket:", "{} minutes apart → moved": "{} dakika arayla → hareket:",
+  "Off: the mark goes exactly where you click, even on dark sky. On: your click moves to the light-weighted centre of the nearest bright spot":
+    "Kapalı: işaret tam tıkladığınız yere konur, karanlık gökyüzünde bile. Açık: tıklamanız en yakın parlak noktanın ışık ağırlıklı merkezine taşınır", "— less than half a pixel, so probably no real motion": "— yarım pikselden az, bu yüzden muhtemelen gerçek hareket yok",
   ": {} long, pointing {}": ": {} uzunluğunda, {} yönünde", "{} SPHEREx pixels": "{} SPHEREx pikseli",
   "({} million km)": "({} milyon km)", "({} light-years)": "({} ışık yılı)",
   "{} · {} MJy/sr · {}″ {}, {}″ {} of centre": "{} · {} MJy/sr · merkezin {}″ {}, {}″ {}",
@@ -176,6 +188,7 @@ const TRL = {
     "Tıklamanızı en yakın parlak noktanın ışık ağırlıklı merkezine taşır; böylece işaretler yıldızın ortasına düşer",
   "Orange ring: where the target should be on each date (from its catalogue motion)": "Turuncu halka: hedefin her tarihte olması gereken yer (katalog hareketinden)",
   "Blue circles: stars in ESA's Gaia catalogue, moved to each date. Hover one for details": "Mavi halkalar: ESA'nın Gaia kataloğundaki yıldızlar, her tarihe taşınmış. Ayrıntı için üzerine gelin",
+  "Brightness scale (see the ? next to it)": "Parlaklık ölçeği (yanındaki ?'ye bakın)",
   "Pink: pixels the NASA pipeline marked as unreliable (overexposed, cosmic rays…)": "Pembe: NASA işlem hattının güvenilmez olarak işaretlediği pikseller (aşırı pozlama, kozmik ışınlar…)",
 };
 const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -378,7 +391,7 @@ function overlays(g, cv, i, diverging) {
   if ($("oMine").checked) {
     if (marks.length > 1) { g.strokeStyle = "rgba(255,176,0,.45)"; g.setLineDash([4, 4]); g.beginPath();
       marks.forEach((m, j) => { const s = toScr(cv, m); j ? g.lineTo(s.x, s.y) : g.moveTo(s.x, s.y); }); g.stroke(); g.setLineDash([]); }
-    marks.forEach((m, j) => { const s = toScr(cv, m); g.globalAlpha = Math.abs(m.mjd - fr.mjd) < 1 ? 1 : 0.55; g.strokeStyle = "#ffb000";
+    marks.forEach((m, j) => { const s = toScr(cv, m); g.globalAlpha = (m.uid ? m.uid === fr.uid : Math.abs(m.mjd - fr.mjd) < 1e-4) ? 1 : 0.55; g.strokeStyle = "#ffb000";
       g.beginPath(); g.arc(s.x, s.y, Math.max(7, 2.2 * k), 0, 7); g.stroke(); g.fillStyle = "#ffb000"; g.fillText(String(j + 1), s.x + 9, s.y - 8); g.globalAlpha = 1; });
     const ln = (a, b, col, label) => { const s = toScr(cv, a), t = toScr(cv, b); g.strokeStyle = col; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(t.x, t.y); g.stroke();
       [s, t].forEach(q => { g.beginPath(); g.arc(q.x, q.y, 3, 0, 7); g.fillStyle = col; g.fill(); });
@@ -453,7 +466,7 @@ function thumbs() {   // comparison card: each mark on its own photo only, side 
   if (!marks.length) { el.innerHTML = '<div class="empty">Mark an object to see it here, on the photo you marked it on.</div>'; return; }
   if (!sample) { el.textContent = "Loading…"; return; }
   const r = 8, [lo, hi] = limits(), kind = $("stretch").value, wrap = document.createElement("div"); wrap.className = "cards";
-  marks.forEach((m, k) => { const i = D.frames.findIndex(f => Math.abs(f.mjd - m.mjd) < 0.01); if (i < 0 || !ready[i]) return;
+  marks.forEach((m, k) => { const i = photoOf(m); if (i < 0 || !ready[i]) return;
     const f = D.frames[i], c = document.createElement("canvas"); c.width = c.height = 2 * r + 1;
     const g = c.getContext("2d"), im = g.createImageData(c.width, c.height), x0 = Math.round(m.x), y0 = Math.round(m.y);
     for (let j = 0; j < c.height; j++) for (let x = 0; x < c.width; x++) { const col = colour(valAt(i, x0 - r + x, y0 + r - j), D.diverging, lo, hi, kind), p = (j * c.width + x) * 4;
@@ -481,7 +494,10 @@ function panel() {
   let ph = "";
   for (let i = 1; i < marks.length; i++) { const a = marks[i - 1], b = marks[i], d = sepArc(a, b), ang = pa(a, b), yrs = Math.abs(b.mjd - a.mjd) / 365.25;
     ph += `<div class="row">#${i} → #${i + 1}: <span class="m">${fmtAng(d)}</span> toward the ${compass(ang)} (${ang.toFixed(0)}° from north)`;
-    if (yrs > 0.02) ph += `<br><span class="small">${yrs.toFixed(2)} years apart → moved <b>${(d / yrs).toFixed(2)}″ per year</b>${d < 3 ? " — less than half a pixel, so probably no real motion" : ""}</span>`;
+    const mins = Math.abs(b.mjd - a.mjd) * 1440, small = d < 3 ? " — less than half a pixel, so probably no real motion" : "";
+    if (yrs > 0.02) ph += `<br><span class="small">${yrs.toFixed(2)} years apart → moved <b>${(d / yrs).toFixed(2)}″ per year</b>${small}</span>`;
+    else if (mins >= 60) ph += `<br><span class="small">${(mins / 60).toFixed(1)} hours apart → moved <b>${(d / mins * 60).toFixed(2)}″ per hour</b>${small}</span>`;
+    else if (mins > 0.01) ph += `<br><span class="small">${mins.toFixed(1)} minutes apart → moved <b>${(d / mins).toFixed(2)}″ per minute</b>${small}</span>`;
     ph += "</div>"; }
   $("pairs").innerHTML = ph || '<div class="empty">' + (marks.length ? "Mark a second object (or the same object on another date) to measure between them." : "Nothing to measure between yet.") + "</div>";
   $("lines").innerHTML = lines.length ? lines.map((l, i) => { const d = sepArc(l.a, l.b);
@@ -498,6 +514,9 @@ function panel() {
 }
 
 // ---------- marks: saved in this browser by photo date, reported to the app ----------
+function photoOf(m) {   // the photo a mark was made on: by its id, else by the nearest date
+  if (m.uid) { const i = D.frames.findIndex(f => f.uid === m.uid); if (i >= 0) return i; }
+  let b = -1, bd = 1e-4; D.frames.forEach((f, i) => { const d = Math.abs(f.mjd - m.mjd); if (d < bd) { bd = d; b = i; } }); return b; }
 function nearestDate(mjd) { let b = 0; D.frames.forEach((f, i) => { if (Math.abs(f.mjd - mjd) < Math.abs(D.frames[b].mjd - mjd)) b = i; }); return D.frames[b].date; }
 function loadMarks() { marks = []; lines = [];
   try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) { marks = (s.marks || []).filter(m => m.mjd !== undefined); lines = (s.lines || []).filter(l => l.mjd !== undefined); } } catch (e) {}
@@ -505,7 +524,7 @@ function loadMarks() { marks = []; lines = [];
 function save() { try { localStorage.setItem(KEY, JSON.stringify({marks, lines})); } catch (e) {} report(); }
 let lastSent = "";
 function report() { clearTimeout(sendT); sendT = setTimeout(() => {
-  const value = {key: KEY, marks: marks.map(m => Object.assign(sky(m), {mjd: m.mjd, date: m.date, x: m.x, y: m.y})),
+  const value = {key: KEY, marks: marks.map(m => Object.assign(sky(m), {mjd: m.mjd, date: m.date, x: m.x, y: m.y, uid: m.uid || "", snap: !!m.snap})),
     lines: lines.map(l => ({a: sky(l.a), b: sky(l.b), mjd: l.mjd, arcsec: sepArc(l.a, l.b)}))};
   const s = JSON.stringify(value); if (s === lastSent) return; lastSent = s;
   send("streamlit:setComponentValue", {dataType: "json", value}); }, 500); }
@@ -536,7 +555,7 @@ $("undo").onclick = () => { if (pending) pending = null; else { const lm = marks
 $("clear").onclick = () => { marks = []; lines = []; pending = null; changed(); };
 $("dist").oninput = panel; $("dunit").onchange = panel;
 $("csv").onclick = () => { let t = "kind,name,date,ra_deg,dec_deg,ra2_deg,dec2_deg,length_arcsec,brightness_at_mark\n";
-  marks.forEach((m, i) => { const s = sky(m), fi = D.frames.findIndex(f => f.date === m.date), b = fi >= 0 ? aper(fi, m) : NaN;
+  marks.forEach((m, i) => { const s = sky(m), fi = photoOf(m), b = fi >= 0 ? aper(fi, m) : NaN;
     t += `mark,#${i + 1},${m.date || ""},${s.ra.toFixed(6)},${s.dec.toFixed(6)},,,,${isFinite(b) ? b.toFixed(4) : ""}\n`; });
   lines.forEach((l, i) => { const a = sky(l.a), b = sky(l.b); t += `line,L${i + 1},${nearestDate(l.mjd)},${a.ra.toFixed(6)},${a.dec.toFixed(6)},${b.ra.toFixed(6)},${b.dec.toFixed(6)},${sepArc(l.a, l.b).toFixed(2)},\n`; });
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([t], {type: "text/csv"})); a.download = "spherex_marks.csv"; a.click(); };
@@ -556,7 +575,8 @@ let drag = null;
     draw(); });
   cv.addEventListener("pointerup", ev => { const d = drag; drag = null; cv.style.cursor = tool === "look" ? "grab" : "crosshair"; if (!D || !d || d.moved) return;
     hover = evImg(cv, ev); const fi = frameUnder(cv), f = D.frames[fi < 0 ? B : fi]; let p = hover;
-    if (tool === "mark") { p = snap(p, fi); marks.push({x: p.x, y: p.y, mjd: f.mjd, date: f.date, t: Date.now()}); changed(); }
+    if (tool === "mark") { const sn = $("snap").checked; p = snap(p, fi);
+      marks.push({x: p.x, y: p.y, mjd: f.mjd, date: f.date, uid: f.uid, snap: sn, t: Date.now()}); changed(); }
     else if (tool === "ruler") { p = snap(p, fi); if (!pending) { pending = p; panel(); } else { lines.push({a: pending, b: p, mjd: f.mjd, t: Date.now()}); pending = null; changed(); } } });
   cv.addEventListener("pointerleave", () => { hover = null; $("hov").style.display = "none"; draw(); });
   cv.addEventListener("wheel", ev => { if (!D) return; ev.preventDefault(); const r = cv.getBoundingClientRect(), sx = (ev.clientX - r.left) * cv.width / r.width, sy = (ev.clientY - r.top) * cv.height / r.height;
@@ -582,5 +602,43 @@ document.addEventListener("keydown", e => { if (!D || e.target.tagName === "INPU
   else if (k === "z") $("undo").click(); else if (k === "0") $("zreset").click();
   else if (k === " ") { e.preventDefault(); $("play").click(); } });
 window.addEventListener("resize", fit);
+// ---------- "?" next to the scale: what linear / sqrt / log / asinh do ----------
+const SCALE_HELP = {
+  en: `<p><b>Brightness scale</b>: how a pixel's brightness becomes grey on the screen. It changes only the look, never the measurements.</p>
+<ul><li><b>linear</b>: grey rises in step with brightness. Honest brightness; faint things disappear.</li>
+<li><b>sqrt</b> (square root): lifts faint parts a little. Galaxy and nebula detail without burning out stars.</li>
+<li><b>log</b> (logarithm): lifts faint parts strongly, squeezes bright ones. Faint glow next to bright stars; lifts the noise too.</li>
+<li><b>asinh</b> (default): linear for the faintest pixels, logarithmic for bright ones. Everyday use: faint and bright stars both visible, calm noise.</li></ul>
+<p><i>Dark</i> sets the level shown black, <i>Bright</i> the level shown white; the scale shapes everything in between. In a difference (red / blue) asinh keeps small changes visible next to big ones.</p>`,
+  tr: `<p><b>Parlaklık ölçeği</b>: bir pikselin parlaklığının ekranda hangi griye dönüştüğü. Yalnızca görünüşü değiştirir, ölçümleri asla.</p>
+<ul><li><b>linear</b> (doğrusal): gri, parlaklıkla aynı adımda artar. Dürüst parlaklık; sönük cisimler kaybolur.</li>
+<li><b>sqrt</b> (karekök): sönük kısımları biraz kaldırır. Yıldızları yakmadan gökada ve bulutsu ayrıntısı.</li>
+<li><b>log</b> (logaritma): sönük kısımları güçlüce kaldırır, parlakları sıkıştırır. Parlak yıldızların yanındaki sönük ışıltı; gürültüyü de kaldırır.</li>
+<li><b>asinh</b> (varsayılan): en sönük pikseller için doğrusal, parlaklar için logaritmik. Günlük kullanım: sönük ve parlak yıldızlar birlikte görünür, gürültü sakin kalır.</li></ul>
+<p><i>Koyu</i> siyah gösterilen düzeyi, <i>Parlak</i> beyaz gösterilen düzeyi belirler; ölçek aradaki her şeyi biçimlendirir. Farkta (kırmızı / mavi) asinh, küçük değişimleri büyüklerin yanında görünür tutar.</p>`};
+function scaleChart() {   // the four curves: pixel brightness across, grey on screen up
+  const c = document.createElement("canvas"), W = 330, H = 120, dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = W * dpr; c.height = H * dpr; c.style.width = W + "px"; c.style.height = H + "px";
+  const g = c.getContext("2d"); g.scale(dpr, dpr); const x0 = 26, y0 = H - 18, w = W - 110, h = H - 28;
+  g.strokeStyle = "#3a4258"; g.lineWidth = 1; g.strokeRect(x0, y0 - h, w, h);
+  g.fillStyle = "#9aa3b5"; g.font = "10.5px system-ui"; g.fillText(LANG === "tr" ? "parlaklık →" : "brightness →", x0 + w - 70, H - 4);
+  g.save(); g.translate(10, y0 - 4); g.rotate(-Math.PI / 2); g.fillText(LANG === "tr" ? "gri →" : "grey →", 0, 0); g.restore();
+  [["linear", "#c3c2b7"], ["sqrt", "#3987e5"], ["log", "#199e70"], ["asinh", "#ffb000"]].forEach(([k, col], j) => {
+    g.strokeStyle = col; g.lineWidth = k === $("stretch").value ? 3 : 1.6; g.beginPath();
+    for (let i = 0; i <= 100; i++) { const t = i / 100, y = stretch(t, k); i ? g.lineTo(x0 + t * w, y0 - y * h) : g.moveTo(x0, y0 - y * h); }
+    g.stroke(); g.fillStyle = col; g.fillText(k, x0 + w + 12, y0 - h + 12 + j * 18); });
+  return c;
+}
+(() => { const wrap = $("qStretch"), q = wrap.querySelector(".qm"), pop = wrap.querySelector(".pop");
+  let pinned = false;
+  const show = () => { pop.innerHTML = SCALE_HELP[LANG === "tr" ? "tr" : "en"]; pop.appendChild(scaleChart()); wrap.classList.add("open"); setHeight(); };
+  const hide = () => { if (!pinned) wrap.classList.remove("open"); };
+  q.addEventListener("mouseenter", show); wrap.addEventListener("mouseleave", hide);
+  q.addEventListener("focus", show); q.addEventListener("blur", () => { pinned = false; hide(); });
+  q.addEventListener("click", () => { pinned = !pinned; pinned ? show() : wrap.classList.remove("open"); });
+  q.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); q.click(); } if (e.key === "Escape") { pinned = false; wrap.classList.remove("open"); } });
+  document.addEventListener("pointerdown", e => { if (!wrap.contains(e.target)) { pinned = false; wrap.classList.remove("open"); } });
+  $("stretch").addEventListener("input", () => { if (wrap.classList.contains("open")) show(); });
+})();
 setTool("mark");
 </script></body></html>

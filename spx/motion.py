@@ -208,7 +208,7 @@ def _choose(tau, fe, fn, oe, on, err, n_dates, span_yr):
     """Fit every model the marks allow; keep the simplest one the data do not clearly reject."""
     n = len(tau)
     fits = {"static": _lsq("static", tau, fe, fn, oe, on, err)}
-    if span_yr > 1e-5 and n_dates >= 2:
+    if span_yr * YEAR * 86400 >= 1 and n_dates >= 2:      # single exposures can be minutes apart
         fits["linear"] = _lsq("linear", tau, fe, fn, oe, on, err)
     if n_dates >= 3 and span_yr >= 0.25 and 2 * n - 5 >= 1:
         fits["linear+parallax"] = _lsq("linear+parallax", tau, fe, fn, oe, on, err)
@@ -258,7 +258,7 @@ def fit(obs: list[Obs]) -> Fit:
     t0 = float(np.sum(w * mjd) / w.sum())
     tau = (mjd - t0) / YEAR
     fe, fn = parallax_factors(ref_ra, ref_dec, mjd)
-    n_dates = len(np.unique(np.round(mjd, 3)))
+    n_dates = _n_photos(mjd)
     span_yr = float(np.ptp(mjd)) / YEAR
     best, fits, tried, g_lin = _choose(tau, fe, fn, oe, on, err, n_dates, span_yr)
     scale = max(1.0, best["rchi2"]) if best["dof"] > 0 else 1.0
@@ -314,7 +314,7 @@ def _leave_one_out(model, tau, fe, fn, oe, on, err):
         mdl, r = model, None
         while True:   # fall back to a simpler model when the other marks cannot carry this one
             enough = 2 * keep.sum() - len(PARAMS[mdl]) >= (0 if mdl in ("linear", "static") else 1)
-            dates = len(np.unique(np.round(tau[keep], 6))) >= (1 if mdl == "static" else 2)
+            dates = _n_photos(tau[keep] * YEAR) >= (1 if mdl == "static" else 2)
             if enough and dates:
                 r = _lsq(mdl, tau[keep], fe[keep], fn[keep], oe[keep], on[keep], err[keep])
                 if r is not None:
@@ -364,7 +364,14 @@ class Classification:
     horizon_days: float = 3652.5   # how far ahead a prediction still means something
 
 
+def _n_photos(mjd) -> int:
+    """How many different photos (dates to the second: single exposures can be a few minutes apart)."""
+    return len(np.unique(np.round(np.asarray(mjd, float) * 86400)))
+
+
 def _speed_text(f: Fit) -> str:
+    if f.span_days < 1 / 24:
+        return f"{f.mu / YEAR / 1440:.2f}″ per minute"
     if f.span_days < 5:
         return f"{f.mu / YEAR / 24:.2f}″ per hour"
     return f"{f.mu:.2f}″ per year"
@@ -383,16 +390,22 @@ def classify(obs, f: Fit, ecl_lat: float | None = None, gaia=None, left_behind=N
 
     obs = sorted(obs, key=lambda o: o.mjd)
     days = f.span_days
-    when = (f"{days * 24:.1f} hours" if days < 2 else f"{days:.0f} days" if days < 2 * YEAR
+    when = (f"{days * 1440:.1f} minutes" if days < 1 / 24 else f"{days * 24:.1f} hours" if days < 2 else f"{days:.0f} days" if days < 2 * YEAR
             else f"{days / YEAR:.1f} years")
     consistent = f.dof > 0 and np.isfinite(f.rchi2) and f.rchi2 < 4
     scattered = f.dof > 0 and np.isfinite(f.rchi2) and f.rchi2 > 9
     if f.model == "static":
         lim = f.mu_limit if np.isfinite(f.mu_limit) else float("inf")
-        strength = 3.0 if lim < 1 else 1.5 if lim < 5 else 0.5   # a weak limit proves little
-        say("static", strength, f"No motion between the positions ({when} apart): they agree within the measuring "
-                                f"error (any motion is below {lim:.2f}″ per year at 3σ).")
-        if lim >= 1:
+        if days < 5:   # photos hours or minutes apart: only fast movers could show; say it per hour / minute
+            per = (f"{lim / YEAR / 1440:.2f}″ per minute" if days < 1 / 24 else f"{lim / YEAR / 24:.2f}″ per hour")
+            say("static", 1.0, f"No motion between the positions ({when} apart): they agree within the measuring "
+                               f"error (any motion is below {per} at 3σ). Over so short a time only an asteroid, "
+                               "a satellite or a meteor could move visibly; every star stands still.")
+        else:
+            strength = 3.0 if lim < 1 else 1.5 if lim < 5 else 0.5   # a weak limit proves little
+            say("static", strength, f"No motion between the positions ({when} apart): they agree within the "
+                                    f"measuring error (any motion is below {lim:.2f}″ per year at 3σ).")
+        if lim >= 1 and days >= 5:
             hint = float(np.sqrt(f.tried.get("linear", {}).get("gain", 0.0)))
             say("pm_star", 0.5 + (1.0 if hint >= 2 else 0.0),
                 f"But the dates are too close together (or the errors too big) to rule out a drift of up to "

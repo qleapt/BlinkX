@@ -167,6 +167,35 @@ def test_a_modest_change_with_tiny_noise_errors_is_not_called_variable():
     assert motion.classify(obs, motion.fit(obs)).variable == ""
 
 
+def test_marks_minutes_apart_on_two_exposures_are_two_dates_and_a_move():
+    # Every exposure: a fast mover marked on two single photos taken 3 minutes apart
+    obs = [motion.Obs(T0, RA0, DEC0, 1.0, "#1"),
+           motion.Obs(T0 + 3 / 1440, RA0 + 20 / 3600 / np.cos(np.radians(DEC0)), DEC0, 1.0, "#2")]
+    f = motion.fit(obs)
+    assert f.n_dates == 2 and f.model == "linear"
+    assert f.mu / motion.YEAR / 24 / 60 == pytest.approx(20 / 3, rel=0.01)   # "/minute
+    c = motion.classify(obs, f)
+    assert c.best == "solar_system"
+    assert any("minute" in r["text"] for r in c.reasons)
+
+
+def test_no_motion_within_hours_is_said_per_hour_without_star_advice():
+    obs = [motion.Obs(T0, RA0, DEC0, 3.0, "#1"), motion.Obs(T0 + 0.2, RA0, DEC0 + 1 / 3600, 3.0, "#2")]
+    c = motion.classify(obs, motion.fit(obs))
+    text = " ".join(r["text"] for r in c.reasons)
+    assert "per hour" in text and "per year" not in text and "nearby star could have" not in text
+
+
+def test_viewer_frames_carry_a_unique_photo_id_even_on_the_same_date():
+    from spx import stack, viewer
+    from types import SimpleNamespace
+    img = np.zeros((8, 8))
+    frames = [stack.Frame(img, f"#{i} 2026-01-01", "D1", T0 + i * 0.002, T0 + i * 0.002 + 0.001, 1, kind="single",
+                          stamps=[SimpleNamespace(uri=f"exp_{i}.fits")]) for i in range(3)]
+    ids = [f["uid"] for f in viewer.payload(frames)["frames"]]
+    assert len(set(ids)) == 3 and ids[0] == viewer.photo_uid(frames[0])
+
+
 def test_fit_as_target_draws_the_same_path_in_the_viewer():
     obs = make_obs([T0, T0 + 200, T0 + 560], mu_e=1.0, mu_n=-2.0)
     f = motion.fit(obs)

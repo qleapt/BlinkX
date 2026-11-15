@@ -251,19 +251,6 @@ def class_fig(prob: dict, names: dict):
     return fig
 
 
-def stretch_fig():
-    """The four brightness scales: how a pixel's brightness (0 = darkest level, 1 = brightest) becomes grey."""
-    x = np.linspace(0, 1, 201)
-    fig = go.Figure()
-    for kind, col in (("linear", INK2), ("sqrt", "#3987e5"), ("log", "#199e70"), ("asinh", ACCENT)):
-        fig.add_trace(go.Scatter(x=x, y=stretch(x, 0, 1, kind), mode="lines", name=kind,
-                                 line=dict(color=col, width=2.5),
-                                 hovertemplate=f"{kind}: brightness %{{x:.2f}} → grey %{{y:.2f}}<extra></extra>"))
-    _chart_layout(fig, "Pixel brightness (0 = Dark level, 1 = Bright level)", "Grey on screen (0 = black, 1 = white)",
-                  height=330)
-    return fig
-
-
 def _rgb(z: np.ndarray, diverging: bool) -> np.ndarray:
     z = np.nan_to_num(z, nan=0.0)
     if diverging:
