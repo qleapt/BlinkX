@@ -4,6 +4,8 @@
 SPHEREx images of that patch of sky play as a short movie. Stars that move (like Barnard's Star) or change
 brightness (like R Draconis) stand out, just like the "blink comparators" astronomers used to find Pluto.
 
+**Live app:** [blinkx.streamlit.app](https://blinkx.streamlit.app) · **29s Demo:** [Watch on YouTube](https://youtu.be/Hd9NpV6CP9E)
+
 **New here? Start with the [tutorial](TUTORIAL.md):** five short lessons with real targets, no astronomy needed.
 
 The tool fetches small image cutouts on demand from the NASA/IPAC Infrared Science Archive (IRSA). Nothing is
@@ -84,7 +86,7 @@ The page writes its current settings back to the address bar, so you can copy an
 Embed in another page:
 
 ```html
-<iframe src="https://YOUR-APP.streamlit.app/?target=WISE+0855&band=D6&fov=10&embed=true"
+<iframe src="https://blinkx.streamlit.app/?target=WISE+0855&band=D6&fov=10&embed=true"
         width="100%" height="900" style="border:0"></iframe>
 ```
 
@@ -192,4 +194,11 @@ repository: they are fetched from their archives and keep their own terms (see *
 
 This tool was written with Claude (Anthropic) as a coding assistant, working from a plan the team approved.
 The team chose the scope and tested the tool; the archive measurements behind the design (cutout layout,
-throttling, wavelength tables) were checked live against IRSA during the build.
+throttling, wavelength tables) were checked live against IRSA during the build. The 29-second demo video also
+uses AI-generated narration and editing, marked with an on-screen watermark.
+
+## Team
+
+- [@KutiKutan](https://github.com/KutiKutan)
+- [@leonarel0](https://github.com/leonarel0)
+- [@yahyaulker](https://github.com/yahyaulker)
