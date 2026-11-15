@@ -229,7 +229,19 @@ function setLang(lg) {
 const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data || {}), "*");
 let lastH = 0;
 function setHeight() { const h = Math.ceil(document.body.scrollHeight) + 4; if (Math.abs(h - lastH) > 2) { lastH = h; send("streamlit:setFrameHeight", {height: h}); } }
-window.addEventListener("message", ev => { if (ev.data && ev.data.type === "streamlit:render") onRender(ev.data.args || {}); });
+// After a band shown at once (spxShowBand) the page may draw this view once more in the band left behind before it
+// catches up: other bands of the same view are skipped until the chosen one arrives (at most 3 s).
+let EXPECT = null;
+const viewOf = t => { const p = (t || "").split("|"); return p.length === 4 ? p[0] + "|" + p[2] + "|" + p[3] : null; };
+window.addEventListener("message", ev => {
+  if (!(ev.data && ev.data.type === "streamlit:render")) return;
+  const args = ev.data.args || {}, t = args.data && args.data.title;
+  if (EXPECT) {
+    if (t === EXPECT.title || performance.now() > EXPECT.until) EXPECT = null;
+    else if (viewOf(t) && viewOf(t) === viewOf(EXPECT.title)) return;
+  }
+  onRender(args);
+});
 send("streamlit:componentReady", {apiVersion: 1});
 if (window.ResizeObserver) new ResizeObserver(setHeight).observe(document.body);
 
@@ -240,10 +252,13 @@ let cur = 0, A = 0, B = 0, tool = "mark", marks = [], lines = [], pending = null
 let view = {z: 1, vx: 0, vy: 0}, swipeX = 0.5, fadeFrom = -1, fadeT0 = 0, sample = null, ver = 0, sendT = null;
 
 // ---------- data ----------
+let SETTINGS = {}, GEN = 0;
+const sigOf = d => [d.nx, d.ny, d.mode, d.title, d.frames.length, d.frames.map(f => f.png.length + ":" + f.png.slice(-24) + ":" + f.mjd).join(",")].join("|");
 function onRender(args) {
   setLang((args.settings || {}).lang === "tr" ? "tr" : "en");
   const d = args.data; if (!d || !d.frames || !d.frames.length) return;
-  const sig = [d.nx, d.ny, d.mode, d.title, d.frames.length, d.frames.map(f => f.png.length + ":" + f.png.slice(-24) + ":" + f.mjd).join(",")].join("|");
+  SETTINGS = args.settings || {};   // kept for a band shown straight from the page's ready list (spxShowBand)
+  const sig = sigOf(d);
   if (sig === SIG) {                                         // same photos: keep zoom, frame and marks; refresh overlays only
     const ov = JSON.stringify([d.changes || [], d.frames.map(f => [(f.gaia || []).length, (f.stars || []).length])]);
     if (ov !== OVS) { OVS = ov; D = d; helperControls(); draw(); }
@@ -251,34 +266,84 @@ function onRender(args) {
   }
   OVS = JSON.stringify([d.changes || [], d.frames.map(f => [(f.gaia || []).length, (f.stars || []).length])]);
   const sameGrid = D && D.nx === d.nx && D.ny === d.ny;
+  // the same view again with more photos in (the rest arrive after it is first shown): keep the user's place
+  const refine = !!D && D.title === d.title && D.frames.length === d.frames.length && KEY === "spx-measure:" + (args.store_key || "");
+  const was = {cur, A, B};
   SIG = sig; D = d; N = d.frames.length; KEY = "spx-measure:" + (args.store_key || "");
   vals = new Array(N); flg = new Array(N); ready = new Array(N).fill(false); renders = new Array(N); diffC = null; diffKey = ""; sample = null;
   const s = args.settings || {};
   if (!sameGrid) view = {z: 1, vx: (D.nx - 1) / 2, vy: (D.ny - 1) / 2};
   if (!$("speed").dataset.init) { $("speed").value = s.speed || 700; $("stretch").value = s.stretch || "asinh"; $("oGaia").checked = s.gaia === true;   // helpers start off: the user finds things
     $("oFlag").checked = !!s.flags; $("speed").dataset.init = 1; }
-  $("blk").value = 1; $("wht").value = D.diverging ? 99.5 : 99.8;
-  cur = N - 1; A = Math.min(N - 1, Math.max(0, s.a || 0)); B = N - 1;
+  if (refine) { cur = was.cur; A = was.A; B = was.B; }
+  else { $("blk").value = 1; $("wht").value = D.diverging ? 99.5 : 99.8; cur = N - 1; A = Math.min(N - 1, Math.max(0, s.a || 0)); B = N - 1; }
   if (N < 2) $("cmp").value = "all";
   $("cmp").disabled = N < 2;
   ["selA", "selB"].forEach((id, k) => { const el = $(id); el.innerHTML = ""; D.frames.forEach((f, i) => { const o = document.createElement("option");
     o.value = i; o.textContent = f.date + " · " + f.label.split(" · ")[0].slice(0, 28); el.appendChild(o); }); el.value = k ? B : A; });
-  loadMarks();
-  D.frames.forEach((f, i) => { const im = new Image(); im.onload = () => decode(i, im); im.src = "data:image/png;base64," + f.png; });
+  if (!refine) loadMarks();
+  const gen = ++GEN, pre = DEC[d.title];
+  if (pre && pre.sig === sig && pre.n === N) {   // decoded ahead (a band the page handed over): shown in this very frame
+    vals = pre.vals.slice(); flg = pre.flg.slice(); ready.fill(true); levels();
+    $("read").textContent = "Move the mouse over the image to read the sky position and brightness.";
+  } else {
+    T_RENDER = performance.now(); setTimeout(draw, 1100);   // (draw waits for the decoding below, at most a second)
+    D.frames.forEach((f, i) => { const im = new Image(); im.onload = () => { if (gen === GEN) decode(i, im); }; im.src = "data:image/png;base64," + f.png; });
+  }
   buildTimeline(); helperControls(); fit(); panel();
 }
+// The bands handed over ahead of time are decoded ahead too, one at a time while the viewer is idle, so showing one
+// is a single draw. Long movies are left to decode when shown.
+const DEC = {};   // title -> {sig, vals, flg, n decoded}
+function predecode() {
+  let reg = null; try { reg = window.parent.__spxAlts; } catch (e) {}
+  if (!reg || !reg.items) return;
+  for (const t in DEC) if (!reg.items[t]) delete DEC[t];   // another view: its bands are forgotten
+  for (const t in reg.items) {
+    const d = reg.items[t].data;
+    if (!d || !d.frames || d.frames.length > 16 || (DEC[t] && DEC[t].sig === sigOf(d))) continue;
+    const e = DEC[t] = {sig: sigOf(d), vals: new Array(d.frames.length), flg: new Array(d.frames.length), n: 0};
+    d.frames.forEach((f, i) => { const im = new Image();
+      im.onload = () => { if (DEC[t] === e) { const r = pixels(d, im); e.vals[i] = r.v; e.flg[i] = r.fl; e.n++; } };
+      im.src = "data:image/png;base64," + f.png; });
+    return;
+  }
+}
+setInterval(predecode, 400);
+// A band chosen in the sidebar that the page lined up in the background and handed over ahead of time
+// (window.parent.__spxAlts, from viewer.alt_html): shown at once; the page catches up a moment later with the same picture.
+let PREV = null;
+window.spxShowBand = band => {
+  try {
+    if (!D || !D.title) return false;
+    const parts = D.title.split("|");
+    if (parts.length !== 4 || parts[1] === band) return false;
+    parts[1] = band;
+    const reg = window.parent.__spxAlts, rec = reg && reg.items && reg.items[parts.join("|")];
+    if (!rec || !rec.data) return false;
+    PREV = {data: D, store_key: KEY.replace(/^spx-measure:/, ""), settings: SETTINGS};
+    EXPECT = {title: parts.join("|"), until: performance.now() + 3000};
+    onRender({data: rec.data, store_key: rec.store_key, settings: Object.assign({}, SETTINGS, rec.settings || {})});
+    return true;
+  } catch (e) { return false; }
+};
+window.spxRestore = () => { EXPECT = null; if (PREV) { const p = PREV; PREV = null; onRender(p); } };   // the choice did not take
 function helperControls() {   // the helper overlays appear only once the user has switched a helper on
   const hasStars = D.frames.some(f => f.stars && f.stars.length), hasChg = !!(D.changes && D.changes.length);
   $("lStars").style.display = hasStars ? "inline-flex" : "none"; $("lChg").style.display = hasChg ? "inline-flex" : "none";
 }
-function decode(i, im) {
-  const c = document.createElement("canvas"); c.width = D.nx; c.height = D.ny;
+function pixels(d, im) {   // one PNG of data d back to its values (and flagged pixels)
+  const c = document.createElement("canvas"); c.width = d.nx; c.height = d.ny;
   const g = c.getContext("2d", {willReadFrequently: true}); g.drawImage(im, 0, 0);
-  const px = g.getImageData(0, 0, D.nx, D.ny).data, n = D.nx * D.ny, v = new Float32Array(n), fl = new Uint8Array(n);
-  for (let j = 0; j < D.ny; j++) for (let x = 0; x < D.nx; x++) {
-    const p = (j * D.nx + x) * 4, q = px[p] * 256 + px[p + 1], k = (D.ny - 1 - j) * D.nx + x;   // numpy row 0 = south
-    v[k] = q === 0 ? NaN : D.lo + D.s * Math.sinh((q - 1) / 65534 * D.a); fl[k] = px[p + 2] > 127 ? 1 : 0; }
-  vals[i] = v; flg[i] = fl; ready[i] = true;
+  const px = g.getImageData(0, 0, d.nx, d.ny).data, n = d.nx * d.ny, v = new Float32Array(n), fl = new Uint8Array(n);
+  for (let j = 0; j < d.ny; j++) for (let x = 0; x < d.nx; x++) {
+    const p = (j * d.nx + x) * 4, q = px[p] * 256 + px[p + 1], k = (d.ny - 1 - j) * d.nx + x;   // numpy row 0 = south
+    v[k] = q === 0 ? NaN : d.lo + d.s * Math.sinh((q - 1) / 65534 * d.a); fl[k] = px[p + 2] > 127 ? 1 : 0; }
+  return {v, fl};
+}
+function decode(i, im) {
+  const r = pixels(D, im);
+  vals[i] = r.v; flg[i] = r.fl; ready[i] = true;
   if (ready.every(Boolean)) { levels(); $("read").textContent = "Move the mouse over the image to read the sky position and brightness."; draw(); panel(); }
   else if (i === cur) draw();
 }
@@ -364,7 +429,8 @@ function fit() {
   if (!D) return; const side = $("cmp").value === "side", W = document.body.clientWidth;
   const avail = Math.max(260, Math.min(side ? 900 : 620, W - (W > 880 ? 270 : 8)));
   const w = Math.floor(side ? (avail - 6) / 2 : avail);
-  [c1, c2].forEach(c => { c.width = c.height = w; }); c2.style.display = side ? "block" : "none"; draw(); setHeight();
+  [c1, c2].forEach(c => { if (c.width !== w) c.width = w; if (c.height !== w) c.height = w; });   // a resize clears it
+  c2.style.display = side ? "block" : "none"; draw(); setHeight();
 }
 function blit(g, cv, src, alpha) { if (!src) return; const k = K(cv), s = toScr(cv, {x: -0.5, y: D.ny - 0.5});
   g.imageSmoothingEnabled = false; g.globalAlpha = alpha === undefined ? 1 : alpha; g.drawImage(src, s.x, s.y, D.nx * k, D.ny * k); g.globalAlpha = 1; }
@@ -410,8 +476,11 @@ function overlays(g, cv, i, diverging) {
   g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax, ay - 28); g.moveTo(ax, ay); g.lineTo(ax - 28, ay); g.stroke();
   g.font = "11px system-ui"; g.fillText(LANG === "tr" ? "K" : "N", ax - 4, ay - 31); g.fillText(LANG === "tr" ? "D" : "E", ax - 39, ay + 4);
 }
+let T_RENDER = 0;
 function draw() {
-  if (!D) return; const m = $("cmp").value; let i = cur, dv = D.diverging;
+  if (!D) return;
+  if (!sample && performance.now() - T_RENDER < 1000) return;   // new photos still decoding: keep the picture there
+  const m = $("cmp").value; let i = cur, dv = D.diverging;
   g1.fillStyle = "#000"; g1.fillRect(0, 0, c1.width, c1.height);
   if (m === "all" || m === "ab") {
     if (fadeFrom >= 0) { const t = Math.min(1, (performance.now() - fadeT0) / fadeDur()); blit(g1, c1, frameCanvas(fadeFrom)); blit(g1, c1, frameCanvas(cur), t);
@@ -520,7 +589,8 @@ function photoOf(m) {   // the photo a mark was made on: by its id, else by the 
 function nearestDate(mjd) { let b = 0; D.frames.forEach((f, i) => { if (Math.abs(f.mjd - mjd) < Math.abs(D.frames[b].mjd - mjd)) b = i; }); return D.frames[b].date; }
 function loadMarks() { marks = []; lines = [];
   try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) { marks = (s.marks || []).filter(m => m.mjd !== undefined); lines = (s.lines || []).filter(l => l.mjd !== undefined); } } catch (e) {}
-  marks.forEach(m => { if (!m.date) m.date = nearestDate(m.mjd); }); report(); }
+  marks.forEach(m => { if (!m.date) m.date = nearestDate(m.mjd); });
+  if (marks.length || lines.length) report(); }   // nothing to tell the page otherwise (a report would redraw it)
 function save() { try { localStorage.setItem(KEY, JSON.stringify({marks, lines})); } catch (e) {} report(); }
 let lastSent = "";
 function report() { clearTimeout(sendT); sendT = setTimeout(() => {

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+import json
 import time
 from itertools import combinations
 from concurrent.futures import ThreadPoolExecutor
@@ -12,8 +13,8 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from astropy.time import Time
 
-from spx import (archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, render, stack, targets,
-                 teleport, viewer, warp)
+from spx import (archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, prefetch, render, stack,
+                 targets, teleport, viewer, warp)
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
 # English / Turkish: everything Streamlit shows goes through i18n.tr() when Turkish is chosen
@@ -344,7 +345,8 @@ with st.sidebar:
     st.caption("Brightness, contrast, speed and flagged pixels are set in the viewer itself.")
     with st.expander("Words used here"):
         st.markdown(GLOSSARY)
-    st.html(warp.SCRIPT, unsafe_allow_javascript=True)  # loading animation, installed once per page
+    # loading animation, and instant band changes for bands loaded ahead: installed once per page
+    st.html(warp.SCRIPT + viewer.BAND_SCRIPT, unsafe_allow_javascript=True)
 
 
 # write the state back to the URL so it can be shared
@@ -370,22 +372,28 @@ def search(ra, dec):  # cached on disk by archive.search (fast list first, compl
 
 
 class Loader:
-    """The star-field loading screen (spx/warp.py) with the current step, in the middle of the page."""
+    """The star-field loading screen (spx/warp.py) with the current step, in the middle of the page. It appears only
+    when there is something to wait for: a step that asks NASA's archive (slow=True), or a page that has already
+    taken config.LOADER_AFTER. What is at hand (a band or view loaded ahead, a display change) shows with no screen."""
 
     def __init__(self):
         self.box, self.t0 = st.empty(), time.time()
         self.title, self.detail, self.stage, self.frac, self.ptext = "", "", 0, None, ""
+        self.shown = False
 
-    def _draw(self):
+    def _draw(self, now=False):
+        if not (now or self.shown or time.time() - self.t0 > config.LOADER_AFTER):
+            return
+        self.shown = True
         T = lambda s: i18n.tr(s, ss.lang)  # noqa: E731  (the card is HTML, so it is translated here)
         self.box.markdown(warp.card(T(self.title), T(self.detail), self.stage, self.frac, T(self.ptext),
                                     stages=[T(s) for s in warp.STAGES]), unsafe_allow_html=True)
 
-    def step(self, title, detail="", stage=0):
+    def step(self, title, detail="", stage=0, slow=False):
         if stage != self.stage:
             self.frac, self.ptext = None, ""
         self.title, self.detail, self.stage = title, detail, stage
-        self._draw()
+        self._draw(slow)
 
     def progress(self, frac, text):
         if (min(1.0, frac), text) != (self.frac, self.ptext):
@@ -400,11 +408,12 @@ class Loader:
 
     def done(self, arrive=True):
         secs = time.time() - self.t0
-        if arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out. The browser keeps
-            self.stage = 4         # that going by itself (warp.SCRIPT) while the photos are drawn underneath
-            self._draw()
-            time.sleep(warp.HANDOVER)
-        self.box.empty()
+        if self.shown:
+            if arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out. The browser keeps
+                self.stage = 4         # that going by itself (warp.SCRIPT) while the photos are drawn underneath
+                self._draw()
+                time.sleep(warp.HANDOVER)
+            self.box.empty()
         _teleport_ahead()   # the waiting is over: get the next /RTP spots ready in the background
         return secs
 
@@ -422,9 +431,13 @@ with st.expander(f"How to use {MODE_LABEL[ss.mode]} (30 seconds)"):
     st.caption("Hover over the small question-mark icons for short explanations; *Words used here* in the sidebar "
                "explains the astronomy terms.")
 load = Loader()
-load.step("Finding your target…", "Reading the position you typed, or looking the name up in the SIMBAD catalogue", 0)
+_known = ss.setdefault("_resolved", set())   # names looked up already (answered from memory)
+load.step("Finding your target…", "Reading the position you typed, or looking the name up in the SIMBAD catalogue", 0,
+          slow=not (targets.preset(ss.target_text) or targets.parse_coords(ss.target_text)
+                    or ss.target_text in _known))
 try:
     tgt = resolve(ss.target_text)
+    _known.add(ss.target_text)
 except targets.TargetNotFound:
     load.done(arrive=False)
     if targets.looks_like_coords(ss.target_text):
@@ -467,10 +480,11 @@ def waiting(t0, what="", step=None, estimate=None):
     return what + f"{el:.0f} s" + extra
 
 
+_searched = archive.is_cached(round(ra0, 4), round(dec0, 4))
 load.step("Asking NASA's archive which photos cover this spot…",
-          "SPHEREx has photographed every part of the sky several times since 2025", 1)
-if not archive.is_cached(round(ra0, 4), round(dec0, 4)):   # a new spot: the photos come right after the search,
-    cutouts.warm()                                         # so their connections open while the archive answers
+          "SPHEREx has photographed every part of the sky several times since 2025", 1, slow=not _searched)
+if not _searched:      # a new spot: the photos come right after the search,
+    cutouts.warm()     # so their connections open while the archive answers
 try:
     _t_search, _ex = time.time(), ThreadPoolExecutor(1)
     _fs = _ex.submit(search, round(ra0, 4), round(dec0, 4))
@@ -493,18 +507,27 @@ if not exps:
     st.stop()
 
 
-def fetch(todo, label, group_of=None):
-    """Download the cutouts. With group_of (uri -> epoch), stop waiting after a while once every epoch has
-    at least one photo: on a slow connection the rest keep downloading into the cache for the next view."""
+def fetch(todo, label, group_of=None, lineup=True):
+    """Download the cutouts. With group_of (uri -> epoch), one photo per epoch comes first, and the page is shown
+    once every epoch has one (after config.FETCH_SOFT_DEADLINE): the rest keep arriving and are filled in.
+    lineup: the photos are lined up next (a second or so for 'Load all'); the spectrum only measures them."""
+    have = {e.uri: cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in todo}
+    n_cached = sum(have.values())
     load.step(f"Flying in: downloading {len(todo)} SPHEREx photos ({label})…",
-              "Reading only the pixels around your target from NASA's archive", 2)
-    stats, enough = {}, None
+              "Reading only the pixels around your target from NASA's archive", 2, slow=n_cached < len(todo))
+    stats, enough, lead_uris = {}, None, None
     if group_of:
         need = set(group_of.values())
 
         def enough(got):
             return need <= {group_of.get(x.uri) for x in got}
-    n_cached = sum(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in todo)
+        done_k = {group_of.get(u) for u, c in have.items() if c}   # epochs with a photo at hand already
+        lead = {}
+        for e in todo:
+            k = group_of.get(e.uri)
+            if k not in done_k:
+                lead.setdefault(k, e.uri)
+        lead_uris = set(lead.values())
     est = eta.Estimator()
     first = est.start(len(todo) - n_cached, n_cached) + eta.ALIGN_SECONDS * len(todo)
     load.progress(0.0, f"0 of {len(todo)} photos · {eta.words(first)}")
@@ -516,7 +539,7 @@ def fetch(todo, label, group_of=None):
         load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · ", estimate=eta.words(left)))
     out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45, progress,
                                     deadline=config.FETCH_SOFT_DEADLINE if group_of else None,
-                                    enough=enough, stats=stats)
+                                    enough=enough, stats=stats, first=lead_uris)
     if not out:
         load.done(arrive=False)
         st.warning("No photos could be downloaded (the archive or your connection is busy). "
@@ -525,7 +548,8 @@ def fetch(todo, label, group_of=None):
     ss["_skipped"] = stats.get("skipped", 0)
     est.learn(max(0, len(out) - n_cached), time.time() - t_fetch)   # better estimates next time
     load.progress(1.0, f"{len(out)} photos" + (f" ({nfail} failed)" if nfail else ""))
-    load.step("Lining the photos up…", "Turning every photo north-up on one grid and averaging each epoch", 3)
+    load.step("Lining the photos up…", "Turning every photo north-up on one grid and averaging each epoch", 3,
+              slow=lineup and len(out) > 40)   # 'Load all': a second or so of work
     return out
 
 
@@ -576,7 +600,11 @@ if ss.mode == "spectrum":
                 epoch_of[e.uri] = k + 1
     nep = max(epoch_of.values())
     fold = nep > len(render.EPOCH_COLORS)  # dense fields: merge time bins so colours never repeat
-    stamps = fetch(todo, "all-band")
+    _nbx = ThreadPoolExecutor(1)   # Gaia neighbours of the target (for the warning below), while the photos load
+    fut_nb = _nbx.submit(catalogs.gaia_cone, *(round(v, 4) for v in targets.position_at(spec_t, config.REFERENCE_MJD)),
+                         0.02)
+    _nbx.shutdown(wait=False)
+    stamps = fetch(todo, "all-band", {e.uri: e.band for e in todo}, lineup=False)   # shown once every band has one
     rows = []
     for s in stamps:
         m = photometry.measure(s, *targets.position_at(spec_t, s.mjd))
@@ -588,13 +616,14 @@ if ss.mode == "spectrum":
     for r in sorted(rows, key=lambda r: (r["epoch"], r["wavelength"])):
         by_epoch.setdefault(r["epoch"], []).append(r)
     load_secs = load.done()
+    prefetch.start(tgt, ra0, dec0, ss.fov, band, exps, include=True)   # every band's view, ahead
     st.subheader(f"{spec_t.name}: SPHEREx spectrum, 0.75–5.0 µm")
     st.caption(f"{len(stamps)} images loaded in {load_secs:.1f} s. " + find_note)
     if find_note:
         st.button(f"← Back to {tgt.name}", on_click=_drop_find, help="Forget this find and measure the target again.")
-    close = {}
+    close, nb_pending = {}, False
     try:  # warn when a Gaia neighbour falls inside the 12" aperture (SPHEREx pixels are 6.15")
-        nb, _ = catalogs.gaia_cone(*(round(v, 4) for v in targets.position_at(spec_t, config.REFERENCE_MJD)), 0.02)
+        nb, _ = fut_nb.result(timeout=config.WAIT_EXTRAS)   # not there yet: added when it arrives (below)
         mids = [min(r["mjd"] for r in rows), max(r["mjd"] for r in rows)]
         pr0, pd0 = targets.position_at(spec_t, mids[0])
         gr0, gd0 = catalogs.gaia_at(nb, mids[0])
@@ -613,8 +642,25 @@ if ss.mode == "spectrum":
             st.warning(f"A Gaia star (G = {g:.1f}) lies {dist} from the target on these dates. "
                        "SPHEREx pixels are 6.15″, so its light blends into the measurement — especially at short "
                        "wavelengths where a faint, cold target is dark.")
+    except FutureTimeout:
+        nb_pending = True
     except Exception:
         pass
+    _have = {s.uri for s in stamps}
+    _missing = [e for e in todo if e.uri not in _have] if ss.get("_skipped") else []
+    if _missing or nb_pending:   # still arriving (photos, or the Gaia check): the page fills it in by itself
+        _akey, _t_wait = f"_auto|spec|{tgt.name}|{ss.fov}|{spec_all}", time.time()
+
+        @st.fragment(run_every=config.REFRESH_EVERY)
+        def spec_watch():
+            photos_in = bool(_missing) and all(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in _missing)
+            if (photos_in or (not _missing and fut_nb.done())) and ss.get(_akey, 0) < 5:
+                ss[_akey] = ss.get(_akey, 0) + 1
+                st.rerun()
+            if _missing and time.time() - _t_wait > 3:
+                st.info(f"{len(_missing)} more SPHEREx photos are still on their way; the spectrum fills in by itself "
+                        "as soon as they arrive.")
+        spec_watch()
     s1, s2 = st.columns([3, 1], vertical_alignment="bottom")
     ep_label = {k: f"Epoch {k}: {v[0]['date']}" for k, v in by_epoch.items() if v}
     show_eps = s1.multiselect("Dates to show", list(ep_label), default=list(ep_label), format_func=ep_label.get,
@@ -694,12 +740,12 @@ wgrid, shape = stack.grid(ra0, dec0, ss.fov)
 arcsec_px = config.PIXEL_SCALE_ARCSEC / config.OVERSAMPLE
 
 
-@st.cache_resource(max_entries=4, show_spinner=False)
+@st.cache_resource(max_entries=8, show_spinner=False)
 def aligned_frames(key, _stamps, _groups, _tgt):
     """Line every photo up on the grid and average each epoch. Kept in memory, so changing a display
     control or the view never lines the photos up again. key: target, field, band, photos. A /RTP spot
-    loaded ahead was lined up in the background already."""
-    return teleport.aligned(key) or stack.epoch_frames(_stamps, _groups, _tgt, wgrid, shape)
+    or another band loaded ahead was lined up in the background already."""
+    return teleport.aligned(key) or prefetch.aligned(key) or stack.epoch_frames(_stamps, _groups, _tgt, wgrid, shape)
 
 
 by_uri, frames = aligned_frames(stack.frames_key(tgt.name, ra0, dec0, ss.fov, band, groups, stamps),
@@ -721,7 +767,7 @@ if fut_survey is not None and frames:
         if not fut_survey.done():
             load.step("Adding the older WISE and 2MASS photos…", "From 2010 and around 2000, to compare with today", 3)
         try:  # never hold the SPHEREx movie back for long: the download continues and is cached
-            items = fut_survey.result(timeout=3)
+            items = fut_survey.result(timeout=config.WAIT_EXTRAS)
         except FutureTimeout:
             items, survey_pending = [], True
         ref = float(np.nanmax([np.nanpercentile(f.image, 99.5) for f in sphx_frames]))
@@ -748,7 +794,7 @@ def target_at(mjd, t=None):
 gaia_stars, gaia_note, gaia_pending = [], "", False
 if fut_gaia is not None:
     try:  # the photos are ready: wait only briefly for the star list (it is cached once it arrives)
-        gaia_stars, src = fut_gaia.result(timeout=8)
+        gaia_stars, src = fut_gaia.result(timeout=config.WAIT_EXTRAS)
         gaia_note = f"{len(gaia_stars)} Gaia DR3 stars (G < {config.GAIA_MAX_G:g}, via {src})"
     except FutureTimeout:
         gaia_pending = True
@@ -773,16 +819,23 @@ COORD_NOTE = ("You typed a sky position, so nothing is followed here (the orange
               "Look for anything that moves or changes yourself, then **Mark** it on two dates to measure it.")
 
 
-def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None, follow=None):
-    """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts).
-    stars / changes: results of the optional helpers (None while they are switched off)."""
+def view_data(shown_frames, b, n_all, n_sphx, diverging=False, key_extra="", stars=None, changes=None, follow=None):
+    """What the sky viewer gets for these frames of band b: (data, store key, index of the first SPHEREx frame).
+    n_all / n_sphx: how many frames the band has in all / from SPHEREx (the rest are older surveys)."""
     cx, cy = (float(v) - 1 for v in wgrid.wcs.crpix)
     data = viewer.payload(shown_frames, target=[target_at(f.mjd_mid, follow) for f in shown_frames],
                           gaia=[gaia_on(f.mjd_mid) for f in shown_frames], scale=arcsec_px, center=(cx, cy),
                           radec=(ra0, dec0), diverging=diverging, mode=ss.mode,
-                          title=f"{tgt.name}|{band}|{ss.fov}|{key_extra}", stars=stars, changes=changes)
-    store = f"{tgt.name}|{ss.fov}|{band}|{key_extra}"
-    first_sphx = len(shown_frames) - len(sphx_frames) if len(shown_frames) == len(frames) else 0
+                          title=f"{tgt.name}|{b}|{ss.fov}|{key_extra}", stars=stars, changes=changes)
+    first_sphx = len(shown_frames) - n_sphx if len(shown_frames) == n_all else 0
+    return data, f"{tgt.name}|{ss.fov}|{b}|{key_extra}", first_sphx
+
+
+def sky_viewer(shown_frames, diverging=False, key_extra="", stars=None, changes=None, follow=None):
+    """The sky viewer (spx/viewer) on the given frames. Returns the user's marks (list of dicts).
+    stars / changes: results of the optional helpers (None while they are switched off)."""
+    data, store, first_sphx = view_data(shown_frames, band, len(frames), len(sphx_frames), diverging, key_extra,
+                                        stars, changes, follow)
     res = viewer.show(data, key=f"viewer|{ss.mode}", store_key=store,
                       settings=dict(stretch=ss.stretch, speed=ss.speed, gaia=False, flags=ss.showflags, lang=ss.lang,
                                     a=first_sphx))
@@ -796,8 +849,8 @@ def pending_notes():
     """Say so when part of the data is still arriving over a slow connection; redraw when it has."""
     msgs = []
     if ss.get("_skipped"):
-        msgs.append(f"{ss['_skipped']} more SPHEREx photos are still downloading (slow connection); each "
-                    "epoch already has at least one")
+        msgs.append(f"{ss['_skipped']} more SPHEREx photos are still on their way; each epoch already has at "
+                    "least one")
     if survey_pending:
         msgs.append("the older WISE (2010) / 2MASS (~2000) photos are still downloading")
     if gaia_pending:
@@ -808,16 +861,18 @@ def pending_notes():
     missing = [e for e in todo if e.uri not in have] if ss.get("_skipped") else []
     akey = f"_auto|{tgt.name}|{band}|{ss.fov}"
     t_first = ss.setdefault(akey + "|t", time.time())
+    t_wait = time.time()
 
-    @st.fragment(run_every=3)
-    def watch():  # checks every 3 s; redraws the whole page once everything still missing has arrived
+    @st.fragment(run_every=config.REFRESH_EVERY)
+    def watch():  # checks every second; redraws the whole page once everything still missing has arrived
         arrived = ((not survey_pending or fut_survey is None or fut_survey.done())
                    and (not gaia_pending or fut_gaia is None or fut_gaia.done())
                    and all(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in missing))
         if arrived and ss.get(akey, 0) < 5 and time.time() - t_first < 600:
             ss[akey] = ss.get(akey, 0) + 1
             st.rerun()
-        st.info("" + "; ".join(msgs) + ". They are added here automatically as soon as they arrive.")
+        if time.time() - t_wait > 3:   # a note only when it takes a while (usually it is over within a second or two)
+            st.info("" + "; ".join(msgs) + ". They are added here automatically as soon as they arrive.")
     watch()
 
 
@@ -1390,6 +1445,7 @@ def track_check(marks):
 
 if ss.mode == "motion":
     load_secs = load.done()
+    prefetch.start(tgt, ra0, dec0, ss.fov, band, exps, survey=fut_survey is not None)   # the other bands, ahead
     f_ = ss.get("find") or {}
     if f_.get("field") == tgt.name and f_.get("marks"):
         st.button(f"Back to {tgt.name}" if tgt.source != "coordinates" else "Back", on_click=_drop_find,
@@ -1412,54 +1468,108 @@ if ss.mode == "motion":
     st.stop()
 
 load_secs = load.done()
+prefetch.start(tgt, ra0, dec0, ss.fov, band, exps, survey=fut_survey is not None)   # the other bands, ahead
 if tgt.source == "coordinates":
     st.caption(COORD_NOTE)
+
+
+def compose(mode_, frames_x, by_uri_x, view_):
+    """What the viewer shows in this mode from one band's frames: (frames shown, diverging colours).
+    view_: the page's choices (A/B and the noise cut for Subtract, order and hiding for Every exposure)."""
+    if mode_ == "sub" and len(frames_x) >= 2:
+        diff = stack.subtract(frames_x[view_["ib"]], frames_x[view_["ia"]])
+        if view_["cut"] > 0:
+            import dataclasses
+            nz = detect.noise(diff.image)
+            diff = dataclasses.replace(diff, image=np.where(np.abs(diff.image) < view_["cut"] * nz, 0.0, diff.image))
+        return [diff], True
+    if mode_ == "movie":
+        al_ = sorted(by_uri_x.values(), key=lambda a: a.stamp.mjd if view_["order"] == "time" else a.stamp.wavelength)
+        if view_["hide"]:
+            al_ = [a for a in al_ if not a.bad_near_target] or al_
+        return [stack.single_frame(a, i + 1) for i, a in enumerate(archive.evenly(al_, config.MOVIE_CAP))], False
+    return frames_x, False
+
+
+def band_alts(mode_, view_, labels_ab_, helpers_on):
+    """The other bands, lined up in the background, handed to the browser in this view's settings: choosing one in
+    the sidebar then shows it at once (viewer.BAND_SCRIPT), and the page catches up a moment later."""
+    if helpers_on or fut_survey is not None or mode_ not in ("blink", "sub", "movie"):
+        return   # helpers and the older surveys are made by the page itself: those band changes go the usual way
+    vkey = json.dumps([tgt.name, ss.fov, mode_, view_, len(gaia_stars), len(exps)])
+    memo = ss.setdefault("_alts", {})
+    if memo.get("vkey") != vkey:
+        memo.clear()
+        memo["vkey"] = vkey
+    others = [b for b in config.BANDS if b != band]
+
+    def alt(b):
+        if b in memo or ss.get(f"all|{tgt.name}|{b}"):   # 'Load all' in that band: not what was loaded ahead
+            return memo.get(b)
+        r = prefetch.ready(tgt.name, ra0, dec0, ss.fov, b, exps)
+        if r is None:
+            return None
+        by_uri_b, frames_b = r[0], list(r[1])
+        v = dict(view_)
+        if mode_ == "sub" and len(frames_b) >= 2 and [f.label.split(":")[0] for f in frames_b] != labels_ab_:
+            v["ia"], v["ib"] = 0, len(frames_b) - 1   # another list of dates: the A/B boxes start at their defaults
+        if mode_ == "movie" and v["hide"]:            # the same switch only when it has the same counts
+            v["hide"] = [sum(bool(a.bad_near_target) for a in by_uri_b.values()), len(by_uri_b)] == v["counts"]
+        shown_b, div_b = compose(mode_, frames_b, by_uri_b, v)
+        data, store, a = view_data(shown_b, b, len(frames_b), len(frames_b), div_b, key_extra=mode_)
+        html = viewer.alt_html(vkey, f"{tgt.name}|{b}|{ss.fov}|{mode_}", dict(data=data, store_key=store,
+                                                                               settings=dict(a=a)))
+        memo[b] = html if len(html) < 3_000_000 else ""   # very long movies of big fields: the usual way
+        return memo[b]
+
+    @st.fragment(run_every=config.REFRESH_EVERY)
+    def deliver():   # a band lined up in the background reaches the browser within a second
+        for b in others:
+            st.html(alt(b) or "<span></span>", unsafe_allow_javascript=True)
+
+    with st.sidebar, st.container(key="spxalts"):
+        deliver()
+
+
 tab_view, tab_exp = st.tabs(["Sky viewer", "Photo list"])
 with tab_view:
     mode = ss.mode
-    diverging = False
-    if mode == "blink" or (mode == "sub" and len(frames) < 2):
-        shown = frames
-        if mode == "sub":
-            st.info("Subtract needs photos from at least two dates (epochs) in this band.")
+    view = dict(ia=0, ib=0, cut=0.0, order="time", hide=False, counts=None)   # the choices this view is made with
+    labels_ab = None
+    if mode == "sub" and len(frames) < 2:
+        st.info("Subtract needs photos from at least two dates (epochs) in this band.")
     elif mode == "sub":
-        labels = [f.label.split(":")[0] for f in frames]
+        labels_ab = [f.label.split(":")[0] for f in frames]
         c1, c2 = st.columns(2)
-        ia = c1.selectbox("Older photo (A)", range(len(frames)), index=len(frames) - len(sphx_frames),
-                          format_func=lambda i: labels[i], help="The 'before' picture.")
-        ib = c2.selectbox("Newer photo (B)", range(len(frames)), index=len(frames) - 1,
-                          format_func=lambda i: labels[i], help="The 'after' picture. The view shows B − A.")
-        diff = stack.subtract(frames[ib], frames[ia])
-        cut = st.slider("Hide changes smaller than (× noise)", 0.0, 6.0, 0.0, 0.5,
-                        help="Sets every pixel whose change is smaller than this many noise levels (σ) to 'no "
-                             "change' (white), so only clear changes stay coloured. 0 shows everything.")
-        if cut > 0:
-            import dataclasses
-            nz = detect.noise(diff.image)
-            diff = dataclasses.replace(diff, image=np.where(np.abs(diff.image) < cut * nz, 0.0, diff.image))
-        shown = [diff]
-        diverging = True
+        view["ia"] = ia = c1.selectbox("Older photo (A)", range(len(frames)), index=len(frames) - len(sphx_frames),
+                                       format_func=lambda i: labels_ab[i], help="The 'before' picture.")
+        view["ib"] = ib = c2.selectbox("Newer photo (B)", range(len(frames)), index=len(frames) - 1,
+                                       format_func=lambda i: labels_ab[i],
+                                       help="The 'after' picture. The view shows B − A.")
+        view["cut"] = st.slider("Hide changes smaller than (× noise)", 0.0, 6.0, 0.0, 0.5,
+                                help="Sets every pixel whose change is smaller than this many noise levels (σ) to "
+                                     "'no change' (white), so only clear changes stay coloured. 0 shows everything.")
         with st.expander("How to read the colours"):
             st.markdown("**Red** = brighter now (in B) · **white / grey** = no change (steady stars cancel out) · "
                         "**blue** = was brighter before (in A).\n\nA **moving star** leaves a blue + red pair — blue "
                         "where it *was*, red where it *is now*. A star that **changed brightness** leaves a single red "
                         "(brightened) or blue (faded) spot. Small rings around very bright stars are leftovers of "
                         "imperfect cancelling, not real changes. The stronger the colour, the bigger the change.")
-    else:  # movie
-        order = st.radio("Order", ["time", "wavelength"], horizontal=True,
-                         help="time: oldest to newest. wavelength: from the bluest to the reddest infrared "
-                              "colour inside the band.")
-        al = sorted(by_uri.values(), key=lambda a: a.stamp.mjd if order == "time" else a.stamp.wavelength)
+    elif mode == "movie":
+        view["order"] = st.radio("Order", ["time", "wavelength"], horizontal=True,
+                                 help="time: oldest to newest. wavelength: from the bluest to the reddest infrared "
+                                      "colour inside the band.")
+        al = list(by_uri.values())
         nflag = sum(bool(a.bad_near_target) for a in al)
+        view["counts"] = [nflag, len(al)]
         if nflag == len(al):
             st.caption(f"All {nflag} photos have warnings at the target (it is probably overexposed in this band), "
                        "so none are hidden. Try another band.")
-        elif nflag and st.toggle(f"Hide photos with warnings at the target ({nflag} of {len(al)})", value=False,
-                               help="Leaves out single photos whose pixels at the target were marked unreliable by the "
-                                    "NASA pipeline (overexposed, cosmic-ray hits…)."):
-            al = [a for a in al if not a.bad_near_target] or al
-        al = archive.evenly(al, config.MOVIE_CAP)
-        shown = [stack.single_frame(a, i + 1) for i, a in enumerate(al)]
+        elif nflag:
+            view["hide"] = st.toggle(f"Hide photos with warnings at the target ({nflag} of {len(al)})", value=False,
+                                     help="Leaves out single photos whose pixels at the target were marked unreliable "
+                                          "by the NASA pipeline (overexposed, cosmic-ray hits…).")
+    shown, diverging = compose(mode, frames, by_uri, view)
 
     # Optional helpers, off until switched on (the user finds things; the tools measure them). Their
     # switches sit below the viewer; their values are known here already, so the viewer can draw results.
@@ -1488,6 +1598,7 @@ with tab_view:
                 c["text"] = (f"moved {arc:.1f}″ toward the {detect.COMPASS[int(round(c['pa_deg'] / 45)) % 8]}"
                              + (f" ({arc / yrs:.1f}″ per year)" if yrs > 0.05 else ""))
     my_marks = sky_viewer(shown, diverging, key_extra=mode, stars=found, changes=changed)
+    band_alts(mode, view, labels_ab, h_stars or h_change)
     pending_notes()
     check_my_find(my_marks, mode)
 

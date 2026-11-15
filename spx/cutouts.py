@@ -7,6 +7,7 @@ exposures of one detector (verified 2026-11-14), so we download it once per dete
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -15,6 +16,7 @@ import re
 import threading
 import time
 import warnings
+from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -165,6 +167,48 @@ def image_wcs(header: fits.Header) -> WCS:
     return WCS(h)
 
 
+# The header cards a celestial WCS reads (82 of the 276 in a SPHEREx IMAGE header). A WCS built from these alone
+# is identical to one built from the whole header (checked on 304 cached photos: parameters, distortion terms and
+# pixel <-> sky to the last bit) and takes 3.6 ms instead of 9.9 ms.
+_WCS_CARDS = re.compile(
+    r"(WCSAXES|NAXIS\d*|CTYPE\d+|CUNIT\d+|CRVAL\d+|CRPIX\d+|CDELT\d+|CROTA\d+|PC\d+_\d+|CD\d+_\d+|PV\d+_\d+|PS\d+_\d+"
+    r"|CNAME\d+|CRDER\d+|CSYER\d+|CZPHS\d+|CPERI\d+|LONPOLE|LATPOLE|RESTFRQ|RESTFREQ|RESTWAV|RADESYS|RADECSYS|EQUINOX"
+    r"|EPOCH|VELREF|SPECSYS|SSYSOBS|SSYSSRC|VELOSYS|ZSOURCE|VELANGL|WCSNAME|DATE-OBS|DATE-BEG|DATE-AVG|DATE-END"
+    r"|DATEREF|DATE|MJD-OBS|MJD-BEG|MJD-AVG|MJD-END|MJDOBS|MJDREF|MJDREFI|MJDREFF|JDREF|JDREFI|JDREFF|TIMESYS"
+    r"|TREFPOS|TREFDIR|PLEPHEM|TIMEUNIT|TIMEOFFS|TSTART|TSTOP|XPOSURE|TELAPSE|TIMSYER|TIMRDER|TIMEDEL|TIMEPIXR"
+    r"|OBSGEO-[XYZLBH]|OBSORBIT|A_ORDER|B_ORDER|AP_ORDER|BP_ORDER|A_\d+_\d+|B_\d+_\d+|AP_\d+_\d+|BP_\d+_\d+|A_DMAX"
+    r"|B_DMAX|CPDIS\d+|CQDIS\d+|DP\d+|DQ\d+|CPERR\d+|CQERR\d+|D2IM\w*|XTENSION|SIMPLE|BITPIX|EXTNAME|EXTVER|END)")
+
+
+def build_wcs(text: str) -> WCS:
+    """image_wcs() of a header given as FITS text (80-character cards), reading only the cards a WCS uses."""
+    if len(text) % 80:
+        return image_wcs(fits.Header.fromstring(text))
+    cards = (text[i:i + 80] for i in range(0, len(text), 80))
+    return image_wcs(fits.Header.fromstring("".join(c for c in cards if _WCS_CARDS.fullmatch(c[:8].rstrip()))))
+
+
+_WCS_MEMO: OrderedDict = OrderedDict()   # header text (sha1) -> WCS; copies are handed out (0.05 ms each)
+_WCS_LOCK = threading.Lock()
+
+
+def header_wcs(text: str) -> WCS:
+    """The WCS of a photo's header text, built once per header (a band seen again, a line-up redone with more
+    photos, a measurement) and handed out as a copy, so threads never share one."""
+    key = hashlib.sha1(text.encode("ascii", "replace")).digest()
+    with _WCS_LOCK:
+        w = _WCS_MEMO.get(key)
+        if w is not None:
+            _WCS_MEMO.move_to_end(key)
+    if w is None:
+        w = build_wcs(text)
+        with _WCS_LOCK:
+            _WCS_MEMO[key] = w
+            while len(_WCS_MEMO) > 4096:
+                _WCS_MEMO.popitem(last=False)
+    return copy.deepcopy(w)
+
+
 def wavelength_at(header: fits.Header, table: fits.BinTableHDU, x: float, y: float):
     hl = fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(header=header), table])
     sw = WCS(header, fobj=hl, key="W")
@@ -192,10 +236,10 @@ class Stamp:
 
     @property
     def wcs(self) -> WCS:
-        """The image WCS. Building one costs ~20 ms, so it is built once per stamp and kept (read-only use)."""
+        """The image WCS, built once per stamp and kept (read-only use); see header_wcs()."""
         w = self.__dict__.get("_wcs")
         if w is None:
-            w = self.__dict__["_wcs"] = image_wcs(fits.Header.fromstring(self.header))
+            w = self.__dict__["_wcs"] = header_wcs(self.header)
         return w
 
     def mask_bits(self, names) -> int:
@@ -427,13 +471,15 @@ def _read_s3(exp: Exposure, ra: float, dec: float, size_arcmin: float, table, la
     n1 = _header_len(buf, off) if off < len(buf) else None
     if n1 is None:
         hi, n1 = _header_at(url, off, lane=lane)
+        hi_text = hi.tostring()
     else:
-        hi = fits.Header.fromstring(buf[off:off + n1].decode("ascii", "replace"))
+        hi_text = buf[off:off + n1].decode("ascii", "replace")
+        hi = fits.Header.fromstring(hi_text)
     img_off = off + n1
     ny, nx = hi["NAXIS2"], hi["NAXIS1"]
     after_img = img_off + _data_len(hi)
     # pixel box (same size as an IRSA cutout of size_arcmin)
-    x, y = image_wcs(hi).world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))
+    x, y = build_wcs(hi_text).world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))
     half = int(np.ceil(size_arcmin * 60 / config.PIXEL_SCALE_ARCSEC / 2))
     x0, x1 = max(0, int(round(float(x))) - half), min(nx, int(round(float(x))) + half + 1)
     y0, y1 = max(0, int(round(float(y))) - half), min(ny, int(round(float(y))) + half + 1)
@@ -511,7 +557,7 @@ def parse_stamp(raw: bytes, exp: Exposure, ra: float, dec: float, table=None) ->
     if table is None and "WCS-WAVE" in [x.name for x in hd]:
         table = hd["WCS-WAVE"]
     if table is not None:
-        x, y = image_wcs(h).world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))
+        x, y = st.wcs.world_to_pixel(SkyCoord(ra * u.deg, dec * u.deg))   # the WCS the stamp keeps
         try:
             st.wavelength, st.bandwidth = wavelength_at(h, table, float(x), float(y))
         except Exception:  # wavelength is a nice-to-have for the blink
@@ -680,13 +726,16 @@ def _quiet_one(e: Exposure, ra: float, dec: float, size_arcmin: float, stop=None
 
 def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, progress=None,
                deadline: float | None = None, enough=None, stats: dict | None = None,
-               background: bool = False, stop=None):
+               background: bool = False, stop=None, first=None):
     """Returns (stamps sorted by time, number of failures).
 
     deadline / enough: after `deadline` seconds, return as soon as enough(stamps) is True. The
     downloads still running carry on in the background and land in the cache for the next view,
     so a slow connection never keeps the page waiting for the last few images. `stats['skipped']`
     receives how many were still downloading.
+
+    first: uris loaded before the others (one photo per date), with the whole connection to themselves, so
+    `enough` is reached as early as possible; the rest start as soon as they are in.
 
     background: photos loaded ahead (for /RTP) on a small separate lane, paused while a foreground download
     runs; stop() returning True calls the rest off. Photos that need IRSA are left for the foreground."""
@@ -702,25 +751,52 @@ def fetch_many(exps: list[Exposure], ra: float, dec: float, size_arcmin: float, 
         return sorted(got, key=lambda s: s.mjd), len(exps) - len(got)
     with _FG_IDLE:
         _FG_BUSY[0] += 1
+    pending = ()
     try:
-        return _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats)
+        stamps, fails, pending = _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats, first)
+        return stamps, fails
     finally:
+        _idle_after(pending)   # photos still arriving for the page shown early keep the background paused
+
+
+def _idle_after(futs) -> None:
+    """Count this foreground load as finished once all of futs are (now, when there are none)."""
+    def release():
         with _FG_IDLE:
             _FG_BUSY[0] -= 1
             _FG_IDLE.notify_all()
+    if not futs:
+        release()
+        return
+    left, lock = [len(futs)], threading.Lock()
+
+    def one(_):
+        with lock:
+            left[0] -= 1
+            last = left[0] == 0
+        if last:
+            release()
+    for f in list(futs):
+        f.add_done_callback(one)
 
 
-def _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats):
+def _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats, first=None):
     t0 = time.time()
     stamps, fails, done = [], 0, 0
     exps = list(exps)
     total = len(exps)
 
     def drain(pending, may_stop):
-        """Collect finished downloads; report progress every 0.5 s even when nothing arrived (heartbeat)."""
+        """Collect finished downloads; report progress every 0.5 s even when nothing arrived (heartbeat).
+        may_stop: return right at the deadline once enough has arrived (the rest keep downloading into the cache)."""
         nonlocal done, fails
         while pending:
-            finished, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            soft = may_stop and deadline is not None
+            if soft and time.time() - t0 > deadline and stamps and (enough is None or enough(stamps)):
+                break
+            left = t0 + deadline - time.time() if soft else 0.5
+            finished, pending = wait(pending, timeout=min(0.5, left) if left > 0.02 else 0.5,
+                                     return_when=FIRST_COMPLETED)
             for f in finished:
                 done += 1
                 if f.exception() is None:
@@ -729,13 +805,10 @@ def _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats):
                     fails += 1
             if progress:
                 progress(done, total)
-            if (may_stop and pending and deadline is not None and time.time() - t0 > deadline
-                    and stamps and (enough is None or enough(stamps))):
-                break  # the rest keep downloading into the cache
         return pending
 
     # one exposure per detector without a cached wavelength table goes first (it brings the table along);
-    # different detectors in parallel, then everything else
+    # different detectors in parallel, then one photo per date (enough to show the view), then everything else
     firsts = {}
     for e in exps:
         if not has_wave_table(e) and not is_cached(e, ra, dec, size_arcmin):
@@ -743,8 +816,18 @@ def _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats):
     for e in firsts.values():
         exps.remove(e)
     drain({_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in firsts.values()}, False)
-    pending = drain({_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in exps}, True)
+
+    def submit(es):   # started in this order (photos at hand are read in milliseconds, never behind a download)
+        return {_FETCH_POOL.submit(get_stamp, e, ra, dec, size_arcmin) for e in es}
+    at_hand = [e for e in exps if is_cached(e, ra, dec, size_arcmin)]
+    lead = [e for e in exps if first and e.uri in first and e not in at_hand]
+    later = [e for e in exps if e not in at_hand and e not in lead]
+    if lead and later:
+        drain(submit(at_hand + lead), False)
+        pending = drain(submit(later), True)
+    else:
+        pending = drain(submit(at_hand + lead + later), True)
     stamps.sort(key=lambda s: s.mjd)
     if stats is not None:
         stats["skipped"] = len(pending)
-    return stamps, fails
+    return stamps, fails, pending

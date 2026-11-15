@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 from pathlib import Path
 
 import numpy as np
@@ -74,6 +75,60 @@ def payload(frames, target=None, gaia=None, scale: float = 3.075, center=(0.0, 0
                 cx=float(center[0]), cy=float(center[1]), ra0=float(radec[0]), dec0=float(radec[1]),
                 diverging=diverging, title=title, mode=mode,
                 changes=[{k: c[k] for k in keep if k in c} for c in (changes or [])])
+
+
+# Band changes at once. The page hands the bands it has lined up in the background to the browser (alt_html, into
+# window.__spxAlts); when a band is then chosen in the sidebar, this script tells the viewer, which shows it straight
+# away (spxShowBand in frontend/index.html), and the page catches up a moment later with the same picture. Bands not
+# handed over yet simply load the usual way. It also hides the page's invisible hand-over box.
+# (No angle-bracket tags in the script: st.html's sanitizer drops a script whose text contains one.)
+BAND_SCRIPT = r"""<script>
+(() => {
+  const W = window;
+  if (W.__spxBandHook) return;
+  W.__spxBandHook = true;
+  const css = document.createElement("style");
+  css.textContent = ".st-key-spxalts{display:none!important}";
+  document.head.appendChild(css);
+  // The band box is a combobox: while its list is open the focus stays in its input, the option under the keyboard is
+  // the input's aria-activedescendant, and a mouse choice is a press (down and up on the same option).
+  const input = () => document.querySelector(".st-key-band input");
+  const open = () => { const i = input(); return !!i && document.activeElement === i; };
+  const bandIn = text => { const m = (text || "").match(/^\s*D([1-6])\b/); return m ? "D" + m[1] : null; };
+  const viewers = () => Array.from(document.querySelectorAll("iframe")).map(f => {
+    try { return f.contentWindow; } catch (e) { return null; } }).filter(w => w && w.spxShowBand);
+  const chosen = () => { const v = (input() || {}).value || ""; return v.length > 3 ? bandIn(v) : null; };   // a full label
+  const show = b => {
+    if (!b) return;
+    viewers().forEach(w => w.spxShowBand(b));   // (a viewer already showing b does nothing)
+    // the box shows the choice right away; if it did not take after all, the viewer goes back
+    setTimeout(() => { const c = chosen(); if (c && c !== b) viewers().forEach(w => w.spxRestore && w.spxRestore()); }, 600);
+  };
+  let down = null;
+  document.addEventListener("pointerdown", e => {
+    down = open() && e.target.closest ? e.target.closest('[role="option"]') : null; }, true);
+  document.addEventListener("pointerup", e => {
+    const o = e.target.closest && e.target.closest('[role="option"]');
+    if (o && o === down && open()) show(bandIn(o.textContent));
+    down = null;
+  }, true);
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || !open()) return;
+    const id = input().getAttribute("aria-activedescendant"), shown = document.querySelectorAll('[role="option"]');
+    const o = (id && document.getElementById(id)) || document.querySelector('[role="option"][data-focused]')
+      || (shown.length === 1 ? shown[0] : null);
+    if (o) show(bandIn(o.textContent));
+  }, true);
+})();
+</script>"""
+
+
+def alt_html(view_key: str, title: str, record: dict) -> str:
+    """One band lined up ahead, for the browser: record = {data (payload()), store_key, settings}. view_key: the view
+    it belongs to (target, field, mode, choices); a new view starts the browser's list afresh."""
+    js = json.dumps({"k": view_key, "t": title, "r": record}, separators=(",", ":")).replace("<", "\\u003c")
+    return ("<script>(() => { const m = " + js + "; let A = window.__spxAlts; "
+            "if (!A || A.key !== m.k) A = window.__spxAlts = {key: m.k, items: {}}; A.items[m.t] = m.r; })();</script>")
 
 
 def show(data: dict, key: str, store_key: str, height: int = 640, settings: dict | None = None):

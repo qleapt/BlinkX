@@ -497,8 +497,10 @@ TR: dict[str, str] = {
     "{} Gaia DR3 stars (G < {}, via {})": "{} Gaia DR3 yıldızı (G < {}, kaynak: {})",
     "Gaia star list still loading": "Gaia yıldız listesi hâlâ yükleniyor",
     "Gaia catalogue unavailable right now.": "Gaia kataloğu şu anda kullanılamıyor.",
-    "{} more SPHEREx photos are still downloading (slow connection); each epoch already has at least one":
-        "{} SPHEREx fotoğrafı daha hâlâ iniyor (yavaş bağlantı); her dönemde zaten en az bir tane var",
+    "{} more SPHEREx photos are still on their way; each epoch already has at least one":
+        "{} SPHEREx fotoğrafı daha yolda; her dönemde zaten en az bir tane var",
+    "{} more SPHEREx photos are still on their way; the spectrum fills in by itself as soon as they arrive.":
+        "{} SPHEREx fotoğrafı daha yolda; geldikleri anda spektrum kendiliğinden tamamlanır.",
     "the older WISE (2010) / 2MASS (~2000) photos are still downloading": "eski WISE (2010) / 2MASS (~2000) fotoğrafları hâlâ iniyor",
     "the Gaia star list is still loading": "Gaia yıldız listesi hâlâ yükleniyor",
     "They are added here automatically as soon as they arrive.": "Gelir gelmez buraya otomatik olarak eklenirler.",

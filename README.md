@@ -95,7 +95,12 @@ Embed in another page:
    and ZODI layers follow from the file's length, learned once per detector), and the connections open while the
    archive search runs. For `/RTP` the next random spots are picked ahead of time and loaded quietly in the
    background (search, photos, lined up), so a jump lands at once; that background work pauses while a load
-   you are waiting for runs.
+   you are waiting for runs. Once a view is on screen, the other five bands of the same spot are loaded and
+   lined up the same way (nearest band first, then the spectrum's photos) and handed to the browser, so a band
+   chosen in the sidebar appears in the same frame. A spot never seen before is shown as soon as every date
+   has one photo (photos already on disk first, then one per date): the rest are filled in by themselves, and
+   Gaia and the older surveys never hold the page for more than half a second. The loading screen only appears
+   when NASA's archive is actually asked.
 4. **Align and stack.** Zodiacal light and the local sky are removed, each exposure is reprojected onto one
    north-up grid at 2× the detector resolution (3.1″ pixels), and the exposures of an epoch are averaged with
    inverse-variance weights. Dead pixels are removed; flagged pixels (saturation, cosmic rays…) get a tiny weight,
@@ -142,6 +147,7 @@ spx/viewer/         the sky viewer: pixel values packed into PNGs, two-way compo
 spx/detect.py       optional helpers: star detection, what changed between two dates
 spx/motion.py       motion engine: joint fit of N positions, model choice, leave-one-out, classification, prediction
 spx/teleport.py     /RTP: the next random spots picked ahead and loaded quietly in the background
+spx/prefetch.py     the other bands of the view loaded and lined up ahead, so a band change is instant
 spx/warp.py         full-window loading screen (canvas star field)
 spx/eta.py          time-left estimate while loading, learned on this computer
 tests/              pytest on synthetic data
