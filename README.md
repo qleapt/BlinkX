@@ -39,6 +39,16 @@ they move together, and how far apart they will be. Optional **helpers**, off un
 *Find what changed* (moved / brightened / faded, strongest first, allowing for all stars brightening together).
 Each view can be downloaded (GIF, CSV).
 
+## Screenshots
+
+| Blink epochs | Subtract (B − A) |
+|---|---|
+| ![Blink epochs on Barnard's Star](docs/screenshots/blink.jpg) | ![Subtract B minus A showing Barnard's Star motion pair](docs/screenshots/substract.jpg) |
+
+| Motion check | Spectrum & light curve |
+|---|---|
+| ![Motion check fit and moving star classification](docs/screenshots/motion-check.jpg) | ![SPHEREx 0.75–5 µm spectrum and D4 light curve](docs/screenshots/spectrum.jpg) |
+
 ## Run it
 
 Needs Python 3.10+ (tested with 3.12).
