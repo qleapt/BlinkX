@@ -1,10 +1,13 @@
-streamlit
-astropy
-astroquery
-reproject
-numpy
-scipy
-pillow
-plotly
-requests
-pytest
+# Python 3.10+ (tested with Python 3.12.10 and the versions below)
+streamlit>=1.67,<2
+astropy>=8.0,<9
+astroquery>=0.4.11,<0.5
+reproject>=0.21,<0.22
+numpy>=2.5,<3
+scipy>=1.18,<2
+pillow>=13.0,<14
+plotly>=7.1,<8
+requests>=2.34,<3
+
+# tests only (python -m pytest -q)
+pytest>=9.2,<10
