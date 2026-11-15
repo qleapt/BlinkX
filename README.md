@@ -91,7 +91,11 @@ Embed in another page:
    wavelength table is identical for all exposures of a detector (checked); the six tables ship with the app in
    `spx/data`. Gaia stars and the older WISE / 2MASS images download in the background at the same time.
    Everything is cached on disk. A target never seen before loads in about 7–10 s (≈ 65 s before these changes);
-   the all-band spectrum in about 13 s.
+   the all-band spectrum in about 13 s. Each photo takes three round trips to AWS (the places of the VARIANCE
+   and ZODI layers follow from the file's length, learned once per detector), and the connections open while the
+   archive search runs. For `/RTP` the next random spots are picked ahead of time and loaded quietly in the
+   background (search, photos, lined up), so a jump lands at once; that background work pauses while a load
+   you are waiting for runs.
 4. **Align and stack.** Zodiacal light and the local sky are removed, each exposure is reprojected onto one
    north-up grid at 2× the detector resolution (3.1″ pixels), and the exposures of an epoch are averaged with
    inverse-variance weights. Dead pixels are removed; flagged pixels (saturation, cosmic rays…) get a tiny weight,
@@ -137,6 +141,7 @@ spx/render.py       stretches, charts (spectrum, light curve, motion, miss dista
 spx/viewer/         the sky viewer: pixel values packed into PNGs, two-way component (frontend/index.html)
 spx/detect.py       optional helpers: star detection, what changed between two dates
 spx/motion.py       motion engine: joint fit of N positions, model choice, leave-one-out, classification, prediction
+spx/teleport.py     /RTP: the next random spots picked ahead and loaded quietly in the background
 spx/warp.py         full-window loading screen (canvas star field)
 spx/eta.py          time-left estimate while loading, learned on this computer
 tests/              pytest on synthetic data

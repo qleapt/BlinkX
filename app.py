@@ -12,7 +12,8 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from astropy.time import Time
 
-from spx import archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, render, stack, targets, viewer, warp
+from spx import (archive, catalogs, config, cutouts, detect, eta, i18n, motion, photometry, render, stack, targets,
+                 teleport, viewer, warp)
 
 st.set_page_config(page_title="SPHEREx Blink Viewer", layout="wide")
 # English / Turkish: everything Streamlit shows goes through i18n.tr() when Turkish is chosen
@@ -258,8 +259,17 @@ def _pick(name):
 
 _init()
 if targets.is_teleport(ss.get("target_text", "")):   # /RTP: a random spot on the sky, written back as RA Dec
-    ss.target_text = targets.teleport_text(*targets.random_position())
+    ss.target_text = teleport.take(ss.setdefault("_rtp_q", []))   # loaded ahead in the background when possible
     ss["_rtp"] = ss.target_text
+    ss["_rtp_used"] = True
+
+
+def _teleport_ahead():
+    """Pick the next /RTP spots and load them quietly in the background, for the current view settings."""
+    want = teleport.settings(ss.mode, ss.band, ss.fov, ss.gaia, ss.survey)
+    ahead = config.TELEPORT_AHEAD if ss.get("_rtp_used") and want[0] != "spectrum" else 1
+    teleport.prepare(ss.setdefault("_rtp_q", []), want, ahead)
+
 
 def _input_hint(text):
     """One line under the search box saying how the text will be read."""
@@ -390,11 +400,12 @@ class Loader:
 
     def done(self, arrive=True):
         secs = time.time() - self.t0
-        if arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out before the photos
-            self.stage = 4
+        if arrive and secs > 0.8:  # long enough to have been seen: slow down and fade out. The browser keeps
+            self.stage = 4         # that going by itself (warp.SCRIPT) while the photos are drawn underneath
             self._draw()
-            time.sleep(0.45)
+            time.sleep(warp.HANDOVER)
         self.box.empty()
+        _teleport_ahead()   # the waiting is over: get the next /RTP spots ready in the background
         return secs
 
 
@@ -458,6 +469,8 @@ def waiting(t0, what="", step=None, estimate=None):
 
 load.step("Asking NASA's archive which photos cover this spot…",
           "SPHEREx has photographed every part of the sky several times since 2025", 1)
+if not archive.is_cached(round(ra0, 4), round(dec0, 4)):   # a new spot: the photos come right after the search,
+    cutouts.warm()                                         # so their connections open while the archive answers
 try:
     _t_search, _ex = time.time(), ThreadPoolExecutor(1)
     _fs = _ex.submit(search, round(ra0, 4), round(dec0, 4))
@@ -684,24 +697,13 @@ arcsec_px = config.PIXEL_SCALE_ARCSEC / config.OVERSAMPLE
 @st.cache_resource(max_entries=4, show_spinner=False)
 def aligned_frames(key, _stamps, _groups, _tgt):
     """Line every photo up on the grid and average each epoch. Kept in memory, so changing a display
-    control or the view never lines the photos up again. key: target, field, band, photos."""
-    by_uri = {}
-    for s in _stamps:
-        a = stack.align(s, wgrid, shape)
-        a.bad_near_target = stack.flags_near(s, *targets.position_at(_tgt, s.mjd))
-        by_uri[s.uri] = a
-    frames = []
-    for k, g in _groups.items():
-        items = [by_uri[e.uri] for e in g if e.uri in by_uri]
-        if items:
-            frames.append(stack.stack_frame(items, f"Epoch {k}: "))
-    return by_uri, frames
+    control or the view never lines the photos up again. key: target, field, band, photos. A /RTP spot
+    loaded ahead was lined up in the background already."""
+    return teleport.aligned(key) or stack.epoch_frames(_stamps, _groups, _tgt, wgrid, shape)
 
 
-by_uri, frames = aligned_frames(
-    (tgt.name, round(ra0, 6), round(dec0, 6), ss.fov, band,
-     tuple((k, tuple(sorted(e.uri for e in g))) for k, g in groups.items()), tuple(sorted(s.uri for s in stamps))),
-    stamps, groups, tgt)
+by_uri, frames = aligned_frames(stack.frames_key(tgt.name, ra0, dec0, ss.fov, band, groups, stamps),
+                                stamps, groups, tgt)
 frames = list(frames)
 sphx_frames = list(frames)
 

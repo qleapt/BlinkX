@@ -72,9 +72,12 @@ def align(st: Stamp, out_wcs: WCS, shape, bad_names=None) -> Aligned:
     w_in = st.wcs
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        a, fp = reproject_interp((img, w_in), out_wcs, shape_out=shape, order="bilinear")
-        v, _ = reproject_interp((var, w_in), out_wcs, shape_out=shape, order="bilinear")
-        s, _ = reproject_interp((suspect.astype(float), w_in), out_wcs, shape_out=shape, order="bilinear")
+        # image, variance and flags share one coordinate transform: reproject computes it once and
+        # interpolates each plane with it (the same numbers as three separate calls, a third of the work)
+        out, fps = reproject_interp((np.stack([img, var, suspect.astype(float)]), w_in), out_wcs,
+                                    shape_out=(3, *shape), order="bilinear")
+    a, v, s = out[0].copy(), out[1], out[2]   # the image is kept: its own array, not a view of all three
+    fp = fps[0]
     a[fp == 0] = np.nan
     wt = np.where(np.isfinite(a) & np.isfinite(v) & (v > 0), 1.0 / np.where(v > 0, v, 1), 0.0)
     flagged = np.nan_to_num(s) > 0
@@ -158,6 +161,29 @@ def stack_frame(items: list[Aligned], label_prefix: str = "") -> Frame:
     return Frame(img, label, band, min(mjds), max(mjds), len(items),
                  min(wls) if wls else np.nan, max(wls) if wls else np.nan, "stack", flags,
                  [a.stamp for a in items], fm)
+
+
+def epoch_frames(stamps, groups: dict, tgt, out_wcs: WCS, shape):
+    """Every photo lined up on the grid (by uri, with its warnings at the target) and one averaged frame per
+    epoch (groups: epoch number -> exposures), in epoch order."""
+    from .targets import position_at
+    by_uri = {}
+    for s in stamps:
+        a = align(s, out_wcs, shape)
+        a.bad_near_target = flags_near(s, *position_at(tgt, s.mjd))
+        by_uri[s.uri] = a
+    frames = []
+    for k, g in groups.items():
+        items = [by_uri[e.uri] for e in g if e.uri in by_uri]
+        if items:
+            frames.append(stack_frame(items, f"Epoch {k}: "))
+    return by_uri, frames
+
+
+def frames_key(name: str, ra0: float, dec0: float, fov, band: str, groups: dict, stamps) -> tuple:
+    """What epoch_frames' result depends on: target, field, band, the epochs' photos and the photos loaded."""
+    return (name, round(ra0, 6), round(dec0, 6), fov, band,
+            tuple((k, tuple(sorted(e.uri for e in g))) for k, g in groups.items()), tuple(sorted(s.uri for s in stamps)))
 
 
 def _or_masks(frames):

@@ -8,12 +8,18 @@ inside it. So the animation is split in two:
   replaces the placeholder, the flight carries on where it was.
 * card() is plain HTML (title, detail, steps, progress bar) that the app updates freely. The stage
   number in `data-stage` sets the speed: it speeds up from stage 0 to 3; stage 4 slows down and fades.
+
+The fade-out at stage 4 does not hold the page: the app removes the card HANDOVER seconds after showing
+stage 4, and SCRIPT puts that same card back on top (it lets the mouse through) to finish slowing down and
+fading while the photos are already drawn underneath.
 """
 from __future__ import annotations
 
 import html as _html
+import json as _json
 
 STAGES = ["Find target", "Search NASA archive", "Download photos", "Line up & average"]
+HANDOVER = 0.08   # s between showing stage 4 and removing the card: enough for the browser to see it arrive
 
 CSS = """<style>
 .spx-warp{position:fixed;inset:0;z-index:1000002;overflow:hidden;
@@ -57,8 +63,30 @@ SCRIPT = r"""<script>
     delay ? setTimeout(arm, delay) : arm();
   }
 
+  // An arrived card (stage 4) outlives its Streamlit element: when the app removes it, the same card goes
+  // back on top of the page (letting the mouse through) and finishes slowing down and fading out while the
+  // photos are drawn underneath. Its look is installed page-wide here, since its own style tag leaves with it.
+  // (No angle-bracket tags in this script: st.html's sanitizer drops a script whose text contains one.)
+  const css = document.createElement("style");
+  css.textContent = __CSS__ + ".spx-warp.spx-ghost{animation:none!important;transition:none!important;pointer-events:none}";
+  document.head.appendChild(css);
+  let seen = null, ghost = null;
+  const bury = () => { if (ghost) { ghost.remove(); ghost = null; } };
+  new MutationObserver(() => {
+    const live = document.querySelector(".spx-warp:not(.spx-ghost)");
+    if (live) { seen = live; bury(); return; }
+    if (seen && !seen.isConnected) {
+      if (seen.dataset.stage === "4" && !reduce && !document.hidden) {
+        bury(); ghost = seen; ghost.style.opacity = "1"; ghost.classList.add("spx-ghost");
+        document.body.appendChild(ghost); W.gstart = performance.now(); next(0);
+        const mine = ghost; setTimeout(() => { if (ghost === mine) bury(); }, 1500);   // never lingers
+      }
+      seen = null;
+    }
+  }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["data-stage"]});
+
   function frame(now) {
-    const host = document.querySelector(".spx-warp");
+    const host = document.querySelector(".spx-warp:not(.spx-ghost)") || ghost;
     if (!host) { W.last = 0; W.fade = 1; W.speed = 0.25; next(200); return; }
     let cv = host.querySelector("canvas");
     if (!cv) { cv = document.createElement("canvas"); cv.setAttribute("aria-hidden", "true"); host.prepend(cv); }
@@ -87,13 +115,18 @@ SCRIPT = r"""<script>
       g.beginPath(); g.moveTo(qx, qy); g.lineTo(px + 0.01, py); g.stroke();
     }
     g.globalAlpha = 1;
+    if (host === ghost) {   // the arrived card dissolves into the page in 0.45 s by the clock, then goes
+      const left = Math.max(0, 1 - (now - W.gstart) / 450);
+      host.style.opacity = left.toFixed(3);
+      if (left <= 0) bury();
+    }
     const still = document.hidden || (reduce && W.drawn === cv);   // hidden tab / static field: check now and then
     if (reduce) W.drawn = cv;
     next(still ? 250 : 0);
   }
   next(0);
 })();
-</script>"""
+</script>""".replace("__CSS__", _json.dumps(CSS.replace("<style>", "").replace("</style>", "")))
 
 
 def card(title: str, detail: str = "", stage: int = 0, frac: float | None = None, prog_text: str = "",

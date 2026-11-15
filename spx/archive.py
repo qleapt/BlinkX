@@ -1,4 +1,4 @@
-"""Find SPHEREx exposures covering a position (IRSA TAP), group them into epochs, thin."""
+"""Find SPHEREx exposures covering a position (IRSA SIA, TAP), group them into epochs, thin."""
 from __future__ import annotations
 
 import csv
@@ -7,7 +7,8 @@ import json
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, asdict
 
 import numpy as np
@@ -60,20 +61,52 @@ def parse_rows(text: str) -> list[Exposure]:
     return out
 
 
-def search_sia(ra: float, dec: float) -> list[Exposure]:
-    """Same exposures through IRSA's SIA image search, all release collections in parallel."""
+# One keep-alive session for IRSA: a search after the first skips the connection set-up (TLS, ~0.5-1 s).
+_IRSA = requests.Session()
+_IRSA.mount("https://", requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=16))
+_COPIES = ThreadPoolExecutor(12, thread_name_prefix="spx-sia")      # copies of one request (see hedged)
+_COLLECTIONS = ThreadPoolExecutor(8, thread_name_prefix="spx-col")  # one task per release collection
 
-    def one(col):
-        r = requests.get(config.SIA_URL, timeout=60, params={
-            "COLLECTION": col, "POS": f"circle {ra:.6f} {dec:.6f} 0.0001", "RESPONSEFORMAT": "CSV",
-            "MAXREC": 50000})
-        r.raise_for_status()
-        rows = list(csv.DictReader(io.StringIO(r.text)))
-        if len(rows) >= 50000 or "OVERFLOW" in r.text[-500:]:
-            raise RuntimeError("SIA result truncated")
-        return rows
-    with ThreadPoolExecutor(len(config.SIA_COLLECTIONS)) as ex:
-        tables = list(ex.map(one, config.SIA_COLLECTIONS))
+
+def hedged(fn, after: float, tries: int, pool=None):
+    """fn() with insurance against a slow or failed answer: when no answer came within `after` seconds, or one
+    failed, another copy starts (at most `tries` in all). The first good answer wins; slower copies are left to
+    finish on their own. Raises the last error when every copy failed."""
+    pool = pool or _COPIES
+    pending, started, last = set(), 0, None
+    while True:
+        if started < tries:
+            pending.add(pool.submit(fn))
+            started += 1
+        done, pending = wait(pending, timeout=after if started < tries else None, return_when=FIRST_COMPLETED)
+        for f in done:
+            if f.exception() is None:
+                return f.result()
+            last = f.exception()
+        if not pending and started >= tries:
+            raise last
+        if done and not pending:   # the only copy failed at once (a hiccup): breathe before the next one
+            time.sleep(0.5)
+
+
+def _sia_rows(col: str, ra: float, dec: float):
+    r = _IRSA.get(config.SIA_URL, timeout=(6, 60), params={
+        "COLLECTION": col, "POS": f"circle {ra:.6f} {dec:.6f} 0.0001", "RESPONSEFORMAT": "CSV",
+        "MAXREC": 50000})
+    r.raise_for_status()
+    rows = list(csv.DictReader(io.StringIO(r.text)))
+    return rows, len(rows) >= 50000 or "OVERFLOW" in r.text[-500:]
+
+
+def search_sia(ra: float, dec: float) -> list[Exposure]:
+    """Same exposures through IRSA's SIA image search, all release collections in parallel. A collection that
+    answers slowly or fails is asked again (staggered copies), so one stuck request does not hold the page."""
+    futs = [_COLLECTIONS.submit(hedged, lambda c=col: _sia_rows(c, ra, dec), config.SEARCH_HEDGE_AFTER,
+                                config.SEARCH_TRIES) for col in config.SIA_COLLECTIONS]
+    answers = [f.result() for f in futs]
+    if any(cut for _, cut in answers):
+        raise RuntimeError("SIA result truncated")
+    tables = [rows for rows, _ in answers]
     out = {}
     for rows in tables:
         for x in rows:
@@ -88,21 +121,69 @@ def search_sia(ra: float, dec: float) -> list[Exposure]:
     return sorted(out.values(), key=lambda e: e.mjd)
 
 
+def _from_cache(path, hours: float):
+    """Exposures saved by an earlier search, or None when there is none or it is too old."""
+    if not path.exists():
+        return None
+    blob = json.loads(path.read_text())
+    if time.time() - blob["t"] < hours * 3600:
+        return [Exposure(**e) for e in blob["rows"]]
+    return None
+
+
+def _tap_path(ra, dec):
+    return config.cache_dir() / f"tap_{ra:.4f}_{dec:+.4f}.json"
+
+
+def _sia_path(ra, dec):
+    return config.cache_dir() / f"sia_{ra:.4f}_{dec:+.4f}.json"
+
+
+def is_cached(ra: float, dec: float) -> bool:
+    """True when a search for this position was saved recently (it is then answered without the network).
+    Only looks at the files' age, so it costs nothing on every page update."""
+    now = time.time()
+    for path, hours in ((_tap_path(ra, dec), config.TAP_CACHE_HOURS), (_sia_path(ra, dec), config.SIA_CACHE_HOURS)):
+        try:
+            if now - path.stat().st_mtime < hours * 3600:
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
-    """All exposures whose footprint contains (ra, dec). Cached on disk for 12 h."""
-    path = config.cache_dir() / f"tap_{ra:.4f}_{dec:+.4f}.json"
-    if use_cache and path.exists():
-        blob = json.loads(path.read_text())
-        if time.time() - blob["t"] < config.TAP_CACHE_HOURS * 3600:
-            return [Exposure(**e) for e in blob["rows"]]
+    """All exposures whose footprint contains (ra, dec). Cached on disk for 12 h. Two searches for the same
+    position at the same time (a /RTP spot being loaded ahead, then used) share one request."""
+    if use_cache:
+        rows = _from_cache(_tap_path(ra, dec), config.TAP_CACHE_HOURS)
+        if rows is not None:
+            return rows
+    key = (f"{ra:.4f}", f"{dec:+.4f}", use_cache)
+    with _PENDING_LOCK:
+        fut = _SEARCHING.get(key)
+        mine = fut is None
+        if mine:
+            fut = _SEARCHING[key] = Future()
+    if not mine:
+        return list(fut.result())
+    try:
+        rows = _search(ra, dec, use_cache)
+        fut.set_result(rows)
+        return list(rows)
+    except BaseException as e:
+        fut.set_exception(e)
+        raise
+    finally:
+        with _PENDING_LOCK:
+            _SEARCHING.pop(key, None)
+
+
+def _search(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
     # Fast path: SIA answers in 1-3 s but can return only part of the list in very dense fields
     # (R Draconis: 539 of 2,493), so the complete TAP search runs in the background and replaces it.
-    sia_path = config.cache_dir() / f"sia_{ra:.4f}_{dec:+.4f}.json"
-    rows = None
-    if use_cache and sia_path.exists():
-        blob = json.loads(sia_path.read_text())
-        if time.time() - blob["t"] < config.SIA_CACHE_HOURS * 3600:
-            rows = [Exposure(**e) for e in blob["rows"]]
+    sia_path = _sia_path(ra, dec)
+    rows = _from_cache(sia_path, config.SIA_CACHE_HOURS) if use_cache else None
     if rows is None:
         try:
             rows = search_sia(ra, dec)
@@ -110,26 +191,67 @@ def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
         except Exception:
             rows = None
     if rows:
-        key = (round(ra, 4), round(dec, 4))
-        with _PENDING_LOCK:
-            start = key not in _PENDING
-            _PENDING.add(key)
-        if start:
-            _BG.submit(_quiet_tap, ra, dec)
+        _complete_later(ra, dec)
         return rows
-    return search_tap(ra, dec)
+    if rows is None:   # SIA failed even after its retries: TAP, with SIA tried again alongside
+        return _tap_or_sia(ra, dec)
+    return search_tap(ra, dec)   # SIA found nothing here: make sure with the complete search
 
 
 _BG = ThreadPoolExecutor(2)
 _PENDING: set = set()
 _PENDING_LOCK = threading.Lock()
+_SEARCHING: dict = {}   # position -> Future of a search in progress
+_TAPS: dict = {}        # position -> Future of the complete TAP list (started once per position)
 
 
 def _quiet_tap(ra, dec):
     try:
-        search_tap(ra, dec)
+        return search_tap(ra, dec)
     except Exception:
-        pass
+        return None
+
+
+def _complete_later(ra: float, dec: float):
+    """Start the complete TAP search in the background, once per position; its Future (result None on failure)."""
+    key = (round(ra, 4), round(dec, 4))
+    with _PENDING_LOCK:
+        if key not in _PENDING:
+            _PENDING.add(key)
+            _TAPS[key] = _BG.submit(_quiet_tap, ra, dec)
+        return _TAPS.get(key)
+
+
+def _tap_or_sia(ra: float, dec: float) -> list[Exposure]:
+    """SIA failed: the complete TAP search (as patient as before) while SIA is asked again every few seconds.
+    The first list with photos wins; a list from SIA leaves TAP running to replace it later, as usual."""
+    tap = _TAP_POOL.submit(search_tap, ra, dec)
+    with _PENDING_LOCK:
+        key = (round(ra, 4), round(dec, 4))
+        _PENDING.add(key)
+        _TAPS[key] = tap
+    while True:
+        try:
+            return tap.result(timeout=8)
+        except FutureTimeout:
+            pass
+        try:
+            rows = search_sia(ra, dec)
+        except Exception:
+            continue
+        if rows:
+            _sia_path(ra, dec).write_text(json.dumps({"t": time.time(), "rows": [asdict(e) for e in rows]}))
+            return rows
+
+
+_TAP_POOL = ThreadPoolExecutor(2, thread_name_prefix="spx-tap")
+
+
+def complete_future(ra: float, dec: float):
+    """The background search for this position's complete (TAP) list: a Future whose result is the list (None,
+    or an error, when it failed), or None when no such search was started in this session."""
+    with _PENDING_LOCK:
+        return _TAPS.get((round(ra, 4), round(dec, 4)))
 
 
 def is_complete(ra: float, dec: float) -> bool:
@@ -142,8 +264,8 @@ def search_tap(ra: float, dec: float) -> list[Exposure]:
     last = None
     for attempt in range(4):
         try:
-            r = requests.get(config.TAP_URL, params={"QUERY": _adql(ra, dec), "FORMAT": "CSV"},
-                             timeout=90)
+            r = _IRSA.get(config.TAP_URL, params={"QUERY": _adql(ra, dec), "FORMAT": "CSV"},
+                          timeout=90)
             if r.status_code in (502, 503, 504):
                 last = f"HTTP {r.status_code}"
                 time.sleep(2 + 3 * attempt)

@@ -74,6 +74,13 @@ USE_S3 = True
 S3_CONCURRENT = 24
 MAX_CONCURRENT = 4         # 8 parallel gave HTTP 503
 HEDGE_AFTER = 5.0          # s: also ask IRSA when the AWS read is this slow (distant/slow links)
+SEARCH_HEDGE_AFTER = 4.0   # s: ask the SIA search again when an answer is this slow (it usually takes 1-3 s)
+SEARCH_TRIES = 3           # SIA requests per collection (staggered) before falling back to TAP
+# /RTP: the next random spots are picked ahead of time and loaded quietly in the background, so a jump lands
+# at once. Background loading pauses while a load you are waiting for runs, and uses few connections.
+TELEPORT_AHEAD = 2         # spots kept ready once /RTP has been used in a session (one before that)
+BG_STAMPS = 3              # photos loaded side by side in the background
+BG_S3_CONCURRENT = 8       # AWS requests at once for background loading (the page you look at gets the rest)
 FETCH_SOFT_DEADLINE = 20   # s: then show what has arrived if every epoch has an image
 RETRIES = 12
 REQUEST_TIMEOUT = 60        # seconds
