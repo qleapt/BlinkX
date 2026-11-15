@@ -78,17 +78,18 @@ SEARCH_HEDGE_AFTER = 2.5   # s: ask the SIA search again when an answer is this 
                            # but now and then 7-30 s: a second request then usually answers first)
 SEARCH_TRIES = 3           # SIA requests per collection (staggered) before falling back to TAP
 SEARCH_RETRY_SIA = 6.0     # s: while the complete search (TAP) runs, a failed quick search (SIA) is asked again
-SEARCH_STALE_WAIT = 2.0    # s: a spot searched before (over 12 h ago) waits this long for a fresh list, then uses
-                           # the saved one; the fresh search carries on and is saved for next time
-# /RTP: random spots are picked ahead of time and loaded quietly in the background, so a jump lands at once. The
-# spots ready to jump to are kept on disk (rtp_stock.json), so they survive a restart. Background loading pauses
-# while a load you are waiting for runs, and uses few connections.
-TELEPORT_AHEAD = 3         # spots kept ready (the archive's list and one photo per date each; the next one fully)
+ARCHIVE_DOWN_FOR = 60.0    # s: after NASA's search services failed, new searches try once quickly (a few seconds) instead
+                           # of retrying for half a minute; spots searched before never wait for them (saved list)
+# /RTP: random spots are picked ahead of time and loaded quietly in the background, so a jump lands at once (see
+# teleport.py). Background loading pauses while a load you are waiting for runs, and uses few connections.
+TELEPORT_STOCK = 20        # /RTP spots kept ready: a new set each time the app starts, one new spot loaded per jump
+TELEPORT_FULL = 3          # of those, the next ones loaded completely (all photos lined up, every band's first photos)
 BG_STAMPS = 3              # photos loaded side by side in the background
 BG_S3_CONCURRENT = 6       # AWS requests at once for background loading (the page you look at gets the rest)
 FETCH_SOFT_DEADLINE = 1.5  # s: then show what has arrived if every epoch has an image (one photo per epoch is
                            # loaded first); the rest keep arriving and the page fills them in by itself
-LOADER_AFTER = 0.4         # s: the loading screen only appears for a wait: NASA's archive asked, or a page this slow
+PROBE_TIMEOUT = 45.0       # s: the one quick search while NASA's search counts as down (an outage fails at once)
+LOADER_AFTER = 1.0         # s: the loading screen only appears for a wait: NASA's archive asked, or a page this slow
 WAIT_EXTRAS = 0.5          # s: the photos never wait longer for the Gaia list or the older surveys (added on arrival)
 REFRESH_EVERY = 1.0        # s: how often the page checks whether the photos still on their way have arrived
 RETRIES = 12

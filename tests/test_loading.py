@@ -193,9 +193,31 @@ def test_background_loading_waits_for_the_page_the_user_waits_for_and_can_be_cal
     assert got == [] and stamps == [] and missing == 4
 
 
+def test_photos_at_hand_are_all_shown_at_once_and_only_downloads_arrive_later(monkeypatch):
+    """Every date has a photo at hand: the page shows at once (deadline 0) with every photo at hand, never a part
+    of them; only the photos still to download are left to arrive (and be filled in quietly)."""
+    monkeypatch.setattr(cutouts, "has_wave_table", lambda e: True)
+    exps = [Exposure("D4", 61000.0 + i, 61000.0 + i, f"u{i}", "v") for i in range(12)]
+    cached = {f"u{i}" for i in range(9)}
+    monkeypatch.setattr(cutouts, "is_cached", lambda e, *a: e.uri in cached)
+
+    def stamp(e, *a, **k):
+        time.sleep(0.001 * (int(e.uri[1:]) % 4) if e.uri in cached else 2.0)   # reads ms apart; downloads slow
+        return Stamp("D4", e.mjd, e.mjd, e.uri, "v", *(np.zeros((2, 2), np.float32),) * 4, "")
+    monkeypatch.setattr(cutouts, "get_stamp", stamp)
+    group = {f"u{i}": i % 3 for i in range(12)}
+    enough = lambda got: {group[s.uri] for s in got} == {0, 1, 2}   # noqa: E731
+    stats, t0 = {}, time.time()
+    stamps, _ = cutouts.fetch_many(exps[:9], 0, 0, 1, deadline=0.0, enough=enough, stats=stats, first=set())
+    assert len(stamps) == 9 and not stats.get("skipped")            # all at hand: all of them, every time
+    stamps, _ = cutouts.fetch_many(exps, 0, 0, 1, deadline=0.0, enough=enough, stats=stats, first=set())
+    assert len(stamps) == 9 and stats["skipped"] == 3 and time.time() - t0 < 1.5   # no wait for the downloads
+
+
 def _fresh_rtp(monkeypatch, tmp_path):
     monkeypatch.setenv("SPHEREX_BLINK_CACHE", str(tmp_path))
-    for name, v in (("_WANT", {}), ("_QUEUED", set()), ("_DONE", set()), ("_BUSY", {1: 0, 2: 0})):
+    for name, v in (("_WANT", {}), ("_QUEUED", set()), ("_DONE", set()), ("_BUSY", {1: 0, 2: 0}), ("_PRIO", set()),
+                    ("_FRESH", [False]), ("_SPARE", [])):
         monkeypatch.setattr(teleport, name, v)
 
 
@@ -219,12 +241,13 @@ def test_rtp_keeps_a_stock_on_disk_and_takes_the_readiest_spot(monkeypatch, tmp_
         steps.append(len(todo))
         return [], len(todo)
     monkeypatch.setattr(cutouts, "fetch_many", fetch)
+    monkeypatch.setattr(config, "TELEPORT_FULL", 1)
     want = teleport.settings("blink", "D4", 5, False, False)
     teleport.prepare(want, 3)
     _drain()
     spots = teleport.stock()
-    assert len(spots) == 3 and all(targets.parse_coords(s) for s in spots)   # saved: it survives a restart
-    assert steps == [2, 2, 2, 6]       # one photo per date of every spot first, then all of the next one
+    assert len(spots) == 3 and all(targets.parse_coords(s) for s in spots)
+    assert steps == [2, 6, 10, 2, 2]   # the next spot fully (its view, every other band's first photos), then the rest
     assert all(teleport.level(s, want) == 1 for s in spots)
     have.update({"e0-0", "e1-0"})                                    # one per date at hand, for the second spot
     ra1 = teleport._where(spots[1])[1]
@@ -236,12 +259,26 @@ def test_rtp_keeps_a_stock_on_disk_and_takes_the_readiest_spot(monkeypatch, tmp_
     teleport.prepare(want, 3)                                        # topped up again; the others are not redone
     _drain()
     assert len(teleport.stock()) == 3 and steps == [2]                # only the new spot's first step
-    steps.clear()
-    teleport._WANT.clear()                                           # a restart: the stock is still there
-    assert teleport.take(want) in spots
-    teleport._WANT.clear()
-    teleport._save([])
-    assert targets.parse_coords(teleport.take(want)) is not None   # nothing waiting: a fresh random spot
+    left = teleport.stock()
+    teleport._WANT.clear()                                           # a restart: a new set of spots
+    teleport._FRESH[0] = False
+    new = teleport.take(want)                                        # no spare is ready: a brand-new spot
+    assert new not in spots and teleport.stock() == [] and spots[1] in teleport.seen()
+    assert not set(left) & set(teleport.seen())                      # the spots never jumped to are spares, not used
+    ra2 = teleport._where(left[1])[1]                                # one spare gets ready (one photo per date)
+    monkeypatch.setattr(cutouts, "is_cached", lambda e, ra, *a: e.uri in have and ra == ra2)
+    assert teleport.take(want) == left[1]                            # while nothing new is ready: the ready spare
+    assert left[1] in teleport.seen() and left[1] not in teleport._SPARE
+
+
+def test_rtp_never_lands_on_a_spot_just_used_written_with_other_decimals(monkeypatch, tmp_path):
+    _fresh_rtp(monkeypatch, tmp_path)
+    teleport._remember("293.01480 +34.51654")                        # jumped to
+    teleport._save(["293.01480 +34.51650", "10.00000 +20.00000"])    # the same spot, rebuilt from a saved list
+    teleport._FRESH[0] = True
+    assert teleport._candidates() == ["10.00000 +20.00000"] and teleport.stock() == ["10.00000 +20.00000"]
+    assert targets.is_teleport("rtp") and targets.is_teleport("/ RTP") and targets.is_teleport("\\rtp")
+    assert not targets.is_teleport("//rtp x") and not targets.is_teleport("rtp star")
 
 
 def test_a_spot_that_could_not_load_is_tried_again_later_unless_it_was_used(monkeypatch, tmp_path):
@@ -273,7 +310,6 @@ def test_a_spot_that_could_not_load_is_tried_again_later_unless_it_was_used(monk
 
 def test_the_search_uses_an_old_list_when_the_archive_is_slow(monkeypatch, tmp_path):
     monkeypatch.setenv("SPHEREX_BLINK_CACHE", str(tmp_path))
-    monkeypatch.setattr(config, "SEARCH_STALE_WAIT", 0.2)
     import json as _json
     old = [Exposure("D1", 61000.0, 61000.0, "old", "v")]
     (tmp_path / "sia_10.0000_+20.0000.json").write_text(
@@ -281,10 +317,8 @@ def test_the_search_uses_an_old_list_when_the_archive_is_slow(monkeypatch, tmp_p
     gate = threading.Event()
     monkeypatch.setattr(archive, "_search", lambda ra, dec, use_cache: gate.wait(5) or [])
     t0 = time.time()
-    assert archive.search(10.0, 20.0) == old and time.time() - t0 < 1   # NASA slow: the saved list at once
+    assert archive.search(10.0, 20.0) == old and time.time() - t0 < 0.5   # a known spot: its saved list at once
     gate.set()
-    monkeypatch.setattr(archive, "_search", lambda ra, dec, use_cache: [Exposure("D1", 1.0, 1.0, "new", "v")])
-    assert archive.search(10.0, 20.0)[0].uri == "new"                # NASA answering: the fresh list
 
 
 def test_rtp_settings_follow_what_each_view_loads():

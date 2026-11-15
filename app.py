@@ -259,9 +259,21 @@ def _pick(name):
 
 
 _init()
-if targets.is_teleport(ss.get("target_text", "")):   # /RTP: a random spot on the sky, written back as RA Dec
+prefetch.warm_presets()   # every challenge target, every band, loaded in the background once per run
+_rtp_again = ss.pop("_rtp_again", False)   # the last /RTP spot had no photos or could not be searched: another one
+if targets.is_teleport(ss.get("target_text", "")) or _rtp_again:   # /RTP: a random spot, written back as RA Dec
     ss.target_text = teleport.take(teleport.settings(ss.mode, ss.band, ss.fov, ss.gaia, ss.survey))  # loaded ahead
     ss["_rtp"] = ss.target_text
+    ss["_rtp_tries"] = ss.get("_rtp_tries", 0) + 1 if _rtp_again else 0
+
+
+def _rtp_retry():
+    """An /RTP spot that cannot be shown (no photos there yet, or NASA's search not answering for it): jump to
+    another spot at once instead of stopping on a message (a few times at most)."""
+    if ss.get("_rtp") == ss.target_text and ss.get("_rtp_tries", 0) < 3:
+        load.done(arrive=False)
+        ss["_rtp_again"] = True
+        st.rerun()
 
 
 def _teleport_ahead():
@@ -390,6 +402,15 @@ class Loader:
         self.box, self.t0 = st.empty(), time.time()
         self.title, self.detail, self.stage, self.frac, self.ptext = "", "", 0, None, ""
         self.shown, self.bar = False, bar
+        # a redraw for photos that arrived in the background: no loading screen (nothing to wait for, the page
+        # stays usable); only a step that really asks NASA's archive may still show one
+        self.quiet = ss.pop("_quiet", False)
+        # the same view again (a mark, a display control, a date picked): no loading screen either, unless a step
+        # has to ask the network (slow=True). A new spot, band, field, view or 'Load all' is a new view.
+        self.view = repr((ss.get("target_text"), ss.get("band"), ss.get("fov"), ss.get("mode"),
+                          sorted(k for k, v in ss.items() if isinstance(k, str) and k.startswith(("all|", "specall|"))
+                                 and v)))
+        self.quiet = self.quiet or ss.get("_lview") == self.view
         self.est = eta.Estimator()
         self.left, self.lid, self.overall = False, f"{self.t0:.3f}", 0.0
         self.tail = self.est.usual("motion") if bar else 0.0   # the motion analysis after the photos
@@ -403,6 +424,8 @@ class Loader:
             self.left = max(0.0, left) + (self.tail if self.stage < 4 else 0.0)
 
     def _draw(self, now=False):
+        if self.quiet and not now:
+            return
         if not (now or self.shown or time.time() - self.t0 > config.LOADER_AFTER):
             return
         self.shown = True
@@ -457,6 +480,8 @@ class Loader:
                 time.sleep(warp.HANDOVER)
             self.box.empty()
             self.shown = False
+        if arrive:
+            ss["_lview"] = self.view
         _teleport_ahead()   # the waiting is over: get the next /RTP spots ready in the background
         return secs
 
@@ -521,7 +546,7 @@ def waiting(t0, what="", search=False):
     return what + f"{el:.0f} s so far" + why
 
 
-_searched = archive.is_cached(round(ra0, 4), round(dec0, 4))
+_searched = archive.is_cached(round(ra0, 4), round(dec0, 4)) or archive.known(round(ra0, 4), round(dec0, 4))
 load.step("Asking NASA's archive which photos cover this spot…",
           "SPHEREx has photographed every part of the sky several times since 2025", 1, slow=not _searched,
           left=(0.2 if _searched else load.est.usual("search")) + load.est.usual("fetch"))
@@ -543,10 +568,14 @@ try:
             load.progress(min(0.95, _el / (_el + _sl)) if _sl is not None else 0.95, waiting(_t_search, search=True),
                           left=None if _sl is None else _sl + load.est.usual("fetch"))
 except archive.ArchiveBusy:
+    _rtp_retry()
     load.done(arrive=False)
-    st.warning("The NASA/IPAC archive is busy right now. Please try again in a minute.")
+    st.warning("NASA's photo search is not answering right now, so a spot never opened on this computer cannot be "
+               "found yet. The challenge targets, /RTP and the places you have opened before still work. Please try "
+               "again in a few minutes.")
     st.stop()
 if not exps:
+    _rtp_retry()
     load.done(arrive=False)
     st.info(f"SPHEREx has no images covering {tgt.name} yet. New data arrive weekly.")
     st.stop()
@@ -558,8 +587,6 @@ def fetch(todo, label, group_of=None, lineup=True):
     lineup: the photos are lined up next (a second or so for 'Load all'); the spectrum only measures them."""
     have = {e.uri: cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in todo}
     n_cached = sum(have.values())
-    load.step(f"Flying in: downloading {len(todo)} SPHEREx photos ({label})…",
-              "Reading only the pixels around your target from NASA's archive", 2, slow=n_cached < len(todo))
     stats, enough, lead_uris = {}, None, None
     if group_of:
         need = set(group_of.values())
@@ -576,10 +603,15 @@ def fetch(todo, label, group_of=None, lineup=True):
     est = load.est
     # the page is shown once every date has a photo: the countdown runs to then, not to the last photo
     new_needed = len(lead_uris) if lead_uris is not None else len(todo) - n_cached
+    # every date has a photo at hand already (a spot or band loaded ahead in part): the page shows at once, with no
+    # loading screen, and the other photos are filled in quietly as they arrive (the watch below)
+    at_once = group_of is not None and new_needed == 0
+    load.step(f"Flying in: downloading {len(todo)} SPHEREx photos ({label})…",
+              "Reading only the pixels around your target from NASA's archive", 2, slow=new_needed > 0)
     target = max(1, n_cached + new_needed)
     rest_new = len(todo) - n_cached - new_needed > 0
     align = eta.ALIGN_SECONDS * target if lineup else 0.0
-    soft = config.FETCH_SOFT_DEADLINE if group_of and rest_new else 0.0
+    soft = config.FETCH_SOFT_DEADLINE if group_of and rest_new and not at_once else 0.0
     left0 = max(est.start(new_needed, n_cached), soft) + align
     load.progress(0.0, f"0 of {len(todo)} photos", left=left0)
     t_fetch = time.time()
@@ -590,7 +622,7 @@ def fetch(todo, label, group_of=None, lineup=True):
         left = None if left is None else max(left, soft - el) + align
         load.progress(d / n, waiting(t_fetch, f"{d} of {n} photos · "), left=left)
     out, nfail = cutouts.fetch_many(todo, ra0, dec0, ss.fov * 1.45, progress,
-                                    deadline=config.FETCH_SOFT_DEADLINE if group_of else None,
+                                    deadline=(0.0 if at_once else config.FETCH_SOFT_DEADLINE) if group_of else None,
                                     enough=enough, stats=stats, first=lead_uris)
     if not out:
         load.done(arrive=False)
@@ -602,8 +634,9 @@ def fetch(todo, label, group_of=None, lineup=True):
     if n_cached < len(todo):
         est.learn_step("fetch", time.time() - t_fetch)
     load.progress(1.0, f"{len(out)} photos" + (f" ({nfail} failed)" if nfail else ""))
+    # not a wait to show by itself: it is mostly in memory already (a mark or a display change redraws the page,
+    # and each of those flashed the loading screen); when it really takes a while, the screen comes after a second
     load.step("Lining the photos up…", "Turning every photo north-up on one grid and averaging each epoch", 3,
-              slow=lineup and len(out) > 40,   # 'Load all': a second or so of work
               left=eta.ALIGN_SECONDS * len(out) if lineup else 0.0)
     return out
 
@@ -659,7 +692,8 @@ if ss.mode == "spectrum":
     fut_nb = _nbx.submit(catalogs.gaia_cone, *(round(v, 4) for v in targets.position_at(spec_t, config.REFERENCE_MJD)),
                          0.02)
     _nbx.shutdown(wait=False)
-    stamps = fetch(todo, "all-band", {e.uri: e.band for e in todo}, lineup=False)   # shown once every band has one
+    stamps = fetch(todo, "all-band", None if spec_all else {e.uri: e.band for e in todo},   # shown once every band
+                   lineup=False)                                     # has one; 'Load more': all of them at once
     rows = []
     for s in stamps:
         m = photometry.measure(s, *targets.position_at(spec_t, s.mjd))
@@ -711,6 +745,7 @@ if ss.mode == "spectrum":
             photos_in = bool(_missing) and all(cutouts.is_cached(e, ra0, dec0, ss.fov * 1.45) for e in _missing)
             if (photos_in or (not _missing and fut_nb.done())) and ss.get(_akey, 0) < 5:
                 ss[_akey] = ss.get(_akey, 0) + 1
+                ss["_quiet"] = True
                 st.rerun()
             if _missing and time.time() - _t_wait > 3:
                 st.info(f"{len(_missing)} more SPHEREx photos are still on their way; the spectrum fills in by itself "
@@ -789,7 +824,9 @@ groups = {k + 1: v for k, v in archive.select(exps, band, quick=not load_all).it
 n_band = sum(e.band == band for e in exps)
 todo = [e for g in groups.values() for e in g]
 # cutouts are 1.45x the field so rotated frames cover the square grid
-stamps = fetch(todo, band, {e.uri: k for k, g in groups.items() for e in g})
+# 'Load all': one wait for every photo, then all of them at once (not a part first and the rest filled in, which
+# brought the loading screen back for each batch); the quick look shows once every date has a photo
+stamps = fetch(todo, band, None if load_all else {e.uri: k for k, g in groups.items() for e in g})
 
 wgrid, shape = stack.grid(ra0, dec0, ss.fov)
 arcsec_px = config.PIXEL_SCALE_ARCSEC / config.OVERSAMPLE
@@ -819,8 +856,7 @@ def old_survey_frames(key, _items, ref):
 survey_pending = False
 if fut_survey is not None and frames:
     try:
-        if not fut_survey.done():
-            load.step("Adding the older WISE and 2MASS photos…", "From 2010 and around 2000, to compare with today", 3)
+        # (no step of its own on the loading screen: it waits half a second at most, which only made it flash)
         try:  # never hold the SPHEREx movie back for long: the download continues and is cached
             items = fut_survey.result(timeout=config.WAIT_EXTRAS)
         except FutureTimeout:
@@ -928,6 +964,7 @@ def pending_notes():
                    and (not gaia_pending or fut_gaia is None or fut_gaia.done()) and not still)
         if arrived and ss.get(akey, 0) < 5 and time.time() - t_first < 600:
             ss[akey] = ss.get(akey, 0) + 1
+            ss["_quiet"] = True
             st.rerun()
         now = time.time()
         if still and len(still) < clock["n"]:   # some came in: the speed seen so far says when the rest will be

@@ -88,8 +88,8 @@ def hedged(fn, after: float, tries: int, pool=None):
             time.sleep(0.5)
 
 
-def _sia_rows(col: str, ra: float, dec: float):
-    r = _IRSA.get(config.SIA_URL, timeout=(6, 60), params={
+def _sia_rows(col: str, ra: float, dec: float, timeout=(6, 60)):
+    r = _IRSA.get(config.SIA_URL, timeout=timeout, params={
         "COLLECTION": col, "POS": f"circle {ra:.6f} {dec:.6f} 0.0001", "RESPONSEFORMAT": "CSV",
         "MAXREC": 50000})
     r.raise_for_status()
@@ -97,12 +97,14 @@ def _sia_rows(col: str, ra: float, dec: float):
     return rows, len(rows) >= 50000 or "OVERFLOW" in r.text[-500:]
 
 
-def search_sia(ra: float, dec: float) -> list[Exposure]:
+def search_sia(ra: float, dec: float, answers=None) -> list[Exposure]:
     """Same exposures through IRSA's SIA image search, all release collections in parallel. A collection that
-    answers slowly or fails is asked again (staggered copies), so one stuck request does not hold the page."""
-    futs = [_COLLECTIONS.submit(hedged, lambda c=col: _sia_rows(c, ra, dec), config.SEARCH_HEDGE_AFTER,
-                                config.SEARCH_TRIES) for col in config.SIA_COLLECTIONS]
-    answers = [f.result() for f in futs]
+    answers slowly or fails is asked again (staggered copies), so one stuck request does not hold the page.
+    answers: the collections' answers already asked for (_probe)."""
+    if answers is None:
+        futs = [_COLLECTIONS.submit(hedged, lambda c=col: _sia_rows(c, ra, dec), config.SEARCH_HEDGE_AFTER,
+                                    config.SEARCH_TRIES) for col in config.SIA_COLLECTIONS]
+        answers = [f.result() for f in futs]
     if any(cut for _, cut in answers):
         raise RuntimeError("SIA result truncated")
     tables = [rows for rows, _ in answers]
@@ -151,6 +153,48 @@ def is_cached(ra: float, dec: float) -> bool:
     return False
 
 
+def known(ra: float, dec: float) -> bool:
+    """True when this position was searched before (a saved list, however old): the page then never waits for the
+    archive. File names only, no reading."""
+    return _tap_path(ra, dec).exists() or _sia_path(ra, dec).exists()
+
+
+# NASA's search services' health. When both answer with errors (e.g. HTTP 502 for hours on 2026-11-15) a new search
+# fails within seconds instead of retrying for half a minute, and spots already on this computer never wait for them.
+# Each new search then sends one quick request first, so the app notices at once when the services are back.
+_HEALTH = {"down_until": 0.0}
+
+
+def down() -> bool:
+    """True while NASA's search services failed recently (config.ARCHIVE_DOWN_FOR)."""
+    return time.time() < _HEALTH["down_until"]
+
+
+def _health(ok: bool) -> None:
+    _HEALTH["down_until"] = 0.0 if ok else time.time() + config.ARCHIVE_DOWN_FOR
+
+
+def _probe(ra: float, dec: float) -> list[Exposure]:
+    """While the services are down: one quick request per collection, no retries. Raises ArchiveBusy at once when
+    they still fail."""
+    try:
+        # an outage answers with an error at once (HTTP 502); a slow but working service needs ~20-30 s, and a
+        # shorter limit took that for an outage again and again, so new spots (and new /RTP spots) never loaded
+        futs = [_COLLECTIONS.submit(_sia_rows, col, ra, dec, (4, config.PROBE_TIMEOUT))
+                for col in config.SIA_COLLECTIONS]
+        answers = [f.result() for f in futs]
+    except Exception as e:
+        _health(False)
+        raise ArchiveBusy(f"NASA's search service is not answering ({type(e).__name__})") from e
+    rows = search_sia(ra, dec, answers)
+    _sia_path(ra, dec).write_text(json.dumps({"t": time.time(), "rows": [asdict(e) for e in rows]}))
+    _health(True)
+    return rows
+
+
+_REFRESHED: dict = {}   # position -> when a fresh list was last asked for in the background
+
+
 def saved(ra: float, dec: float) -> list[Exposure] | None:
     """The list saved by an earlier search of this position, however old (the complete one when there is one), or
     None. No network."""
@@ -170,20 +214,27 @@ _REFRESH = ThreadPoolExecutor(4, thread_name_prefix="spx-refresh")
 def search(ra: float, dec: float, use_cache: bool = True) -> list[Exposure]:
     """All exposures whose footprint contains (ra, dec). Cached on disk for 12 h. Two searches for the same
     position at the same time (a /RTP spot being loaded ahead, then used) share one request. A position searched
-    longer ago waits config.SEARCH_STALE_WAIT for a fresh list and otherwise uses the saved one (new photos of the
+    longer ago is answered at once from its saved list while a fresh one is asked for quietly (new photos of the
     week then appear on the next visit): NASA's archive being slow or down never holds a known spot."""
     if use_cache:
         rows = _from_cache(_tap_path(ra, dec), config.TAP_CACHE_HOURS)
         if rows is not None:
             return rows
         old = saved(ra, dec)
-        if old:
-            fut = _REFRESH.submit(_fresh, ra, dec, use_cache)
-            try:
-                return fut.result(timeout=config.SEARCH_STALE_WAIT) or old
-            except Exception:   # still asking (it carries on and is saved), or the archive failed
-                return old
+        if old:   # a known spot: shown at once from its saved list; a fresh one is asked for quietly (new photos of
+            key = (round(ra, 4), round(dec, 4))   # the week appear on the next visit), at most every 10 minutes
+            if not down() and time.time() - _REFRESHED.get(key, 0) > 600:
+                _REFRESHED[key] = time.time()
+                _REFRESH.submit(_quiet_fresh, ra, dec, use_cache)
+            return old
     return _fresh(ra, dec, use_cache)
+
+
+def _quiet_fresh(ra, dec, use_cache):
+    try:
+        _fresh(ra, dec, use_cache)
+    except Exception:
+        pass
 
 
 def _fresh(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
@@ -217,6 +268,10 @@ def _search(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
     if rows:
         _complete_later(ra, dec)
         return rows
+    if down():   # failed a moment ago: one quick try instead of half a minute of retries
+        rows = _probe(ra, dec)
+        _complete_later(ra, dec)
+        return rows
     tap = _tap_race(ra, dec)
     sia = _RACE.submit(_sia_saved, ra, dec)
     pending, sia_empty, last_try = {tap, sia}, False, time.time()
@@ -226,6 +281,7 @@ def _search(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
             if f is tap:
                 full = f.result()        # None: TAP failed after its retries
                 if full is not None:
+                    _health(True)
                     return full          # the complete list (also when it is empty)
                 tap = None
             else:
@@ -234,11 +290,13 @@ def _search(ra: float, dec: float, use_cache: bool) -> list[Exposure]:
                 except Exception:
                     quick = None
                 if quick:
+                    _health(True)
                     return quick         # TAP carries on in the background and replaces it
                 sia_empty = sia_empty or quick == []
         if tap is None and not pending:  # TAP gave up
             if sia_empty:
                 return []
+            _health(False)
             raise ArchiveBusy("NASA's archive did not answer")
         if tap is not None and not any(f is not tap for f in pending) and not sia_empty                 and time.time() - last_try >= config.SEARCH_RETRY_SIA:   # SIA failed: ask it again meanwhile
             pending.add(_RACE.submit(_sia_saved, ra, dec))
@@ -308,14 +366,16 @@ def is_complete(ra: float, dec: float) -> bool:
 
 def search_tap(ra: float, dec: float) -> list[Exposure]:
     path = config.cache_dir() / f"tap_{ra:.4f}_{dec:+.4f}.json"
-    last = None
+    last, errors = None, 0
     for attempt in range(4):
         try:
             r = _IRSA.get(config.TAP_URL, params={"QUERY": _adql(ra, dec), "FORMAT": "CSV"},
                           timeout=90)
             if r.status_code in (502, 503, 504):
-                last = f"HTTP {r.status_code}"
-                time.sleep(2 + 3 * attempt)
+                last, errors = f"HTTP {r.status_code}", errors + 1
+                if errors >= 2:   # answered with an error twice: down, not slow (retrying only makes us wait)
+                    break
+                time.sleep(1.5)
                 continue
             r.raise_for_status()
             rows = parse_rows(r.text)

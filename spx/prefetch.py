@@ -5,18 +5,25 @@ another band, or the spectrum, shows it at once.
 Like the /RTP spots loaded ahead (teleport.py) this uses the background lane: it pauses while a load you are waiting
 for runs, and it stops as soon as you move to another spot or field. Everything it loads lands in the usual caches,
 so a band that was only half ready still loads faster.
+
+The challenge targets are loaded once at the start of every run of the app (warm_presets): every band's quick look,
+lined up and kept for the whole run, and the spectrum's photos, so picking any of them, in any band or view, is
+immediate. Their photo lists are saved on this computer, so this works even while NASA's search is down.
 """
 from __future__ import annotations
 
 import threading
+import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
-from . import archive, catalogs, config, cutouts, stack, teleport
+from . import archive, catalogs, config, cutouts, stack, targets, teleport
 
 _JOBS = ThreadPoolExecutor(1, thread_name_prefix="spx-bands")
 _READY: OrderedDict = OrderedDict()   # stack.frames_key -> (by_uri, frames), lined up in the background
 _LOCK = threading.Lock()
+_PINNED: dict = {}   # the challenge targets' views, lined up at the start: kept for the whole run
+_WARM = {"started": False, "done": False, "views": 0}
 _KEEP = 8          # lined-up bands kept in memory (one spot's six, and a little more)
 _VIEW = [None]     # the spot and field being loaded ahead; another one calls the old work off
 NEAREST = 2        # bands loaded before the next /RTP spots get their first photos
@@ -70,7 +77,8 @@ def aligned(key):
         got = _READY.get(key)
         if got is not None:
             _READY.move_to_end(key)
-        return got
+            return got
+        return _PINNED.get(key)
 
 
 def _keep(key, value) -> None:
@@ -119,3 +127,72 @@ def _run(view, tgt, ra0, dec0, fov, bands, exps, survey) -> None:
             cutouts.fetch_many(spec, ra0, dec0, size, background=True, stop=stale)
         except Exception:
             pass
+
+
+def warm_presets(fov=5) -> None:
+    """Once per run of the app: every challenge target in every band (the quick look, lined up and kept) and the
+    photos of its spectrum, in the background lane (a load you are waiting for goes first). Returns at once."""
+    with _LOCK:
+        if _WARM["started"]:
+            return
+        _WARM["started"] = True
+    threading.Thread(target=_warm, args=(fov,), daemon=True, name="spx-presets").start()
+
+
+def warm_status() -> dict:
+    """How far warm_presets got: views lined up so far, and whether it is done."""
+    with _LOCK:
+        return dict(_WARM)
+
+
+def _warm(fov) -> None:
+    size = fov * 1.45
+    items = []
+    for name in targets.PRESETS:
+        t = targets.preset(name)
+        ra0, dec0 = targets.position_at(t, config.REFERENCE_MJD)
+        try:
+            exps = archive.search(round(ra0, 4), round(dec0, 4))   # saved on this computer: no waiting
+        except Exception:
+            continue
+        if exps:
+            items.append((t, ra0, dec0, exps, order(targets.PRESET_BAND.get(name, "D3"), include=True)))
+    # each target's own band first (what opens when it is picked), then band by band, then the spectra
+    for i in range(len(config.BANDS)):
+        for t, ra0, dec0, exps, bands in items:
+            _warm_view(t, ra0, dec0, fov, bands[i], exps, size)
+    for t, ra0, dec0, exps, _ in items:
+        spec = [e for b in config.BANDS
+                for g in archive.select(exps, b, quick=True, cap=config.SPEC_CAP_PER_BAND,
+                                        quick_total=config.SPEC_QUICK_PER_BAND).values() for e in g]
+        try:
+            cutouts.fetch_many([e for e in spec if not cutouts.is_cached(e, ra0, dec0, size)], ra0, dec0, size,
+                               background=True)
+        except Exception:
+            pass
+    with _LOCK:
+        _WARM["done"] = True
+
+
+def _warm_view(t, ra0, dec0, fov, band, exps, size) -> None:
+    groups = groups_for(exps, band)
+    todo = [e for g in groups.values() for e in g]
+    if not todo:
+        return
+    key = stack.frames_key(t.name, ra0, dec0, fov, band, groups, todo)
+    with _LOCK:
+        if key in _PINNED:
+            return
+    for attempt in range(3):   # a photo that did not arrive (a dropped connection) is asked for again
+        try:
+            stamps, _ = cutouts.fetch_many(todo, ra0, dec0, size, background=True)
+        except Exception:
+            stamps = []
+        if len(stamps) == len(todo):
+            wgrid, shape = stack.grid(ra0, dec0, fov)
+            ready = stack.epoch_frames(stamps, groups, t, wgrid, shape)
+            with _LOCK:
+                _PINNED[key] = ready
+                _WARM["views"] += 1
+            return
+        time.sleep(5)

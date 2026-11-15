@@ -822,11 +822,14 @@ def _fetch_many(exps, ra, dec, size_arcmin, progress, deadline, enough, stats, f
     at_hand = [e for e in exps if is_cached(e, ra, dec, size_arcmin)]
     lead = [e for e in exps if first and e.uri in first and e not in at_hand]
     later = [e for e in exps if e not in at_hand and e not in lead]
-    if lead and later:
+    # the photos at hand are always all read (milliseconds) before the page may be shown: only downloads are left
+    # to arrive later. Returning while some were still being read showed part of a view that was all there, and
+    # counted the rest as 'on their way', each costing the page another redraw.
+    pending = set()
+    if at_hand or lead:
         drain(submit(at_hand + lead), False)
+    if later:
         pending = drain(submit(later), True)
-    else:
-        pending = drain(submit(at_hand + lead + later), True)
     stamps.sort(key=lambda s: s.mjd)
     if stats is not None:
         stats["skipped"] = len(pending)

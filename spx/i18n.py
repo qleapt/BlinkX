@@ -145,6 +145,11 @@ TR: dict[str, str] = {
         "Ad araması başarısız oldu ({}). `269.452 4.693` gibi koordinatlar her zaman çalışır.",
     "The NASA/IPAC archive is busy right now. Please try again in a minute.":
         "NASA/IPAC arşivi şu anda meşgul. Lütfen bir dakika sonra yeniden deneyin.",
+    "NASA's photo search is not answering right now, so a spot never opened on this computer cannot be found yet. "
+    "The challenge targets, /RTP and the places you have opened before still work. Please try again in a few minutes.":
+        "NASA'nın fotoğraf araması şu anda yanıt vermiyor, bu yüzden bu bilgisayarda hiç açılmamış bir nokta henüz "
+        "bulunamıyor. Örnek hedefler, /RTP ve daha önce açtığınız yerler yine çalışır. Lütfen birkaç dakika sonra "
+        "yeniden deneyin.",
     "SPHEREx has no images covering {} yet. New data arrive weekly.":
         "SPHEREx'in henüz {} bölgesini kapsayan görüntüsü yok. Yeni veriler her hafta gelir.",
     "No photos could be downloaded (the archive or your connection is busy). Please try again in a minute.":

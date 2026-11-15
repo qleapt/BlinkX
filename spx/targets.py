@@ -95,8 +95,9 @@ TELEPORT = "/rtp"
 
 
 def is_teleport(text: str) -> bool:
-    """'/RTP' (random teleport) in any case: jump to a random spot on the sky."""
-    return (text or "").strip().lower() == TELEPORT
+    """'/RTP' (random teleport) in any case, also typed as 'RTP', '\\RTP' or '/ RTP': jump to a random spot."""
+    s = re.sub(r"\s+", "", (text or "").lower())
+    return s.lstrip("/\\") == TELEPORT.lstrip("/") and len(s) - len(s.lstrip("/\\")) <= 1
 
 
 def random_position(rng=None) -> tuple[float, float]:
